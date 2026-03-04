@@ -1,0 +1,757 @@
+---
+title: Group Chat
+description: Create and manage group conversations with multiple participants
+---
+
+Group chats enable multi-party conversations with advanced features like member management, permissions, and admin controls.
+
+## Creating Groups
+
+### Create a Basic Group
+
+Create a group with default settings:
+
+```swift Conversations.swift:268-298
+let group = try await client.conversations.newGroup(
+    with: [inboxId1, inboxId2, inboxId3]
+)
+
+print("Group created: \(group.id)")
+```
+
+### Create with Identities
+
+Create a group using wallet addresses:
+
+```swift
+let group = try await client.conversations.newGroupWithIdentities(
+    with: [
+        PublicIdentity(kind: .ethereum, identifier: "0x123..."),
+        PublicIdentity(kind: .ethereum, identifier: "0x456...")
+    ]
+)
+```
+
+### Create with Permissions
+
+Set group permissions at creation:
+
+```swift GroupTests.swift:169-174
+let group = try await client.conversations.newGroup(
+    with: [inboxId1, inboxId2],
+    permissions: GroupPermissionPreconfiguration.adminOnly
+)
+
+// Available permission presets:
+// - .allMembers: All members can add/remove members
+// - .adminOnly: Only admins can manage membership
+```
+
+### Create with Custom Options
+
+```swift
+let group = try await client.conversations.newGroup(
+    with: [inboxId1, inboxId2],
+    permissions: .allMembers,
+    groupName: "Project Team",
+    groupImageUrlSquare: "https://example.com/image.jpg",
+    groupDescription: "Team collaboration space",
+    groupPinnedFrameUrl: nil
+)
+```
+
+## Group Metadata
+
+### Get Group Information
+
+```swift Group.swift:203-237
+let group = try await client.conversations.listGroups().first!
+
+// Basic properties
+let id = group.id
+let topic = group.topic
+let createdAt = group.createdAt
+let createdAtNs = group.createdAtNs
+let lastActivityAtNs = group.lastActivityAtNs
+
+// Group metadata
+let name = try group.name()
+let imageUrl = try group.imageUrl()
+let description = try group.description()
+let appData = try group.appData()
+
+print("Group: \(name)")
+print("Description: \(description)")
+```
+
+### Update Group Metadata
+
+```swift Group.swift:219-237
+// Update group name
+try await group.updateName(name: "New Team Name")
+
+// Update image
+try await group.updateImageUrl(imageUrl: "https://example.com/new-image.jpg")
+
+// Update description
+try await group.updateDescription(description: "Updated description")
+
+// Update app-specific data
+try await group.updateAppData(appData: "{\"theme\": \"dark\"}")
+```
+
+## Member Management
+
+### List Members
+
+```swift Group.swift:137-143
+let members = try await group.members
+
+for member in members {
+    print("Member: \(member.inboxId)")
+    print("  Joined: \(member.joinedAt)")
+}
+
+// Get peer members (excluding yourself)
+let peers = try await group.peerInboxIds
+print("Other members: \(peers)")
+```
+
+### Add Members
+
+<Steps>
+
+<Step title="Add by inbox ID">
+
+```swift Group.swift:173-179
+let result = try await group.addMembers(
+    inboxIds: [newMemberInboxId]
+)
+
+print("Added: \(result.addedMembers)")
+print("Failed: \(result.failedMembers)")
+```
+
+</Step>
+
+<Step title="Add by identity">
+
+```swift Group.swift:186-193
+let result = try await group.addMembersByIdentity(
+    identities: [
+        PublicIdentity(kind: .ethereum, identifier: "0x789...")
+    ]
+)
+
+print("Added members: \(result.addedMembers)")
+```
+
+</Step>
+
+<Step title="Sync to see updates">
+
+```swift Group.swift:71-73
+try await group.sync()
+
+let updatedMembers = try await group.members
+print("Total members: \(updatedMembers.count)")
+```
+
+</Step>
+
+</Steps>
+
+### Remove Members
+
+```swift Group.swift:181-184
+try await group.removeMembers(
+    inboxIds: [memberToRemove]
+)
+
+try await group.sync()
+```
+
+Or remove by identity:
+
+```swift Group.swift:195-201
+try await group.removeMembersByIdentity(
+    identities: [
+        PublicIdentity(kind: .ethereum, identifier: "0x123...")
+    ]
+)
+```
+
+### Leave Group
+
+```swift Group.swift:856-858
+try await group.leaveGroup()
+
+print("Left the group")
+```
+
+## Admin Operations
+
+### Check Admin Status
+
+```swift Group.swift:91-97
+// Check if user is admin
+let isAdmin = try group.isAdmin(inboxId: userInboxId)
+
+// Check if user is super admin (creator)
+let isSuperAdmin = try group.isSuperAdmin(inboxId: userInboxId)
+
+if isSuperAdmin {
+    print("User has full control")
+}
+```
+
+### Promote to Admin
+
+```swift Group.swift:99-101
+try await group.addAdmin(inboxId: memberInboxId)
+
+print("\(memberInboxId) is now an admin")
+```
+
+### Promote to Super Admin
+
+```swift Group.swift:107-109
+try await group.addSuperAdmin(inboxId: memberInboxId)
+
+print("\(memberInboxId) is now a super admin")
+```
+
+### Demote Admins
+
+```swift Group.swift:103-113
+// Remove admin privileges
+try await group.removeAdmin(inboxId: adminInboxId)
+
+// Remove super admin privileges
+try await group.removeSuperAdmin(inboxId: superAdminInboxId)
+```
+
+### List Admins
+
+```swift Group.swift:115-121
+let admins = try group.listAdmins()
+let superAdmins = try group.listSuperAdmins()
+
+print("Admins: \(admins)")
+print("Super Admins: \(superAdmins)")
+```
+
+## Group Permissions
+
+### View Permission Policies
+
+```swift Group.swift:123-127
+let policies = try group.permissionPolicySet()
+
+print("Add member policy: \(policies.addMemberPolicy)")
+print("Remove member policy: \(policies.removeMemberPolicy)")
+print("Add admin policy: \(policies.addAdminPolicy)")
+print("Remove admin policy: \(policies.removeAdminPolicy)")
+```
+
+### Update Member Permissions
+
+```swift Group.swift:239-259
+// Control who can add members
+try await group.updateAddMemberPermission(
+    newPermissionOption: .admin  // or .allow, .deny, .superAdmin
+)
+
+// Control who can remove members
+try await group.updateRemoveMemberPermission(
+    newPermissionOption: .admin
+)
+```
+
+### Update Admin Permissions
+
+```swift Group.swift:261-281
+// Control who can add admins
+try await group.updateAddAdminPermission(
+    newPermissionOption: .superAdmin
+)
+
+// Control who can remove admins
+try await group.updateRemoveAdminPermission(
+    newPermissionOption: .superAdmin
+)
+```
+
+### Update Metadata Permissions
+
+```swift Group.swift:283-317
+// Control who can update group name
+try await group.updateNamePermission(
+    newPermissionOption: .admin
+)
+
+// Control who can update description
+try await group.updateDescriptionPermission(
+    newPermissionOption: .admin
+)
+
+// Control who can update image
+try await group.updateImageUrlPermission(
+    newPermissionOption: .admin
+)
+```
+
+**Available Permission Options:**
+```swift
+public enum PermissionOption {
+    case allow       // All members
+    case deny        // No one
+    case admin       // Admins only
+    case superAdmin  // Super admins only
+}
+```
+
+## Group Creator Information
+
+### Check if You Created the Group
+
+```swift Group.swift:87-89
+let isCreator = try await group.isCreator()
+
+if isCreator {
+    print("You created this group")
+}
+```
+
+### Get Creator Info
+
+```swift Group.swift:129-135
+let creatorInboxId = try await group.creatorInboxId()
+let addedByInboxId = try group.addedByInboxId()
+
+print("Created by: \(creatorInboxId)")
+print("You were added by: \(addedByInboxId)")
+```
+
+## Group Status
+
+### Check Activity Status
+
+```swift Group.swift:83-85
+let isActive = try group.isActive()
+
+if !isActive {
+    print("Group is inactive or closed")
+}
+```
+
+### Get Membership State
+
+```swift Group.swift:145-149
+let membershipState = try group.membershipState
+
+switch membershipState {
+case .allowed:
+    print("Active member")
+case .rejected:
+    print("Membership rejected")
+case .pending:
+    print("Pending approval")
+case .restored:
+    print("Membership restored")
+case .pendingRemove:
+    print("Being removed")
+}
+```
+
+## Messaging in Groups
+
+### Send Messages
+
+```swift Group.swift:364-386
+// Send text message
+let messageId = try await group.send(content: "Hello, group!")
+
+// Send with options
+let messageId = try await group.send(
+    content: "Important update",
+    options: SendOptions(contentType: ContentTypeText)
+)
+```
+
+### Receive Messages
+
+```swift Group.swift:550-623
+// Get message history
+let messages = try await group.messages(limit: 50)
+
+// Stream new messages
+let stream = group.streamMessages()
+
+for try await message in stream {
+    print("New message: \(message.content())")
+}
+```
+
+### Get Last Message
+
+```swift Group.swift:523-529
+if let lastMessage = try await group.lastMessage() {
+    print("Last message: \(lastMessage.content())")
+    print("Sent at: \(lastMessage.sentAt)")
+}
+```
+
+## Disappearing Messages
+
+### Check if Enabled
+
+```swift Group.swift:59-61
+let isEnabled = try group.isDisappearingMessagesEnabled()
+
+if isEnabled {
+    let settings = group.disappearingMessageSettings
+    print("Messages disappear after: \(settings?.retentionDurationInNs ?? 0) ns")
+}
+```
+
+### Configure Disappearing Messages
+
+```swift Group.swift:319-333
+let settings = DisappearingMessageSettings(
+    disappearStartingAtNs: Date().millisecondsSinceEpoch,
+    retentionDurationInNs: 24 * 60 * 60 * 1_000_000_000  // 24 hours
+)
+
+try await group.updateDisappearingMessageSettings(settings)
+```
+
+### Clear Disappearing Messages
+
+```swift Group.swift:335-337
+try await group.clearDisappearingMessageSettings()
+```
+
+## Consent Management
+
+### Get Consent State
+
+```swift Group.swift:348-350
+let consentState = try group.consentState()
+
+switch consentState {
+case .allowed:
+    print("Group is allowed")
+case .denied:
+    print("Group is blocked")
+case .unknown:
+    print("No preference set")
+}
+```
+
+### Update Consent
+
+```swift Group.swift:344-346
+// Allow the group
+try await group.updateConsentState(state: .allowed)
+
+// Block the group
+try await group.updateConsentState(state: .denied)
+```
+
+## Advanced Features
+
+### Sync Group State
+
+Always sync before checking group state:
+
+```swift Group.swift:71-73
+try await group.sync()
+
+// Now access updated data
+let members = try await group.members
+let messages = try await group.messages()
+```
+
+### Process Streamed Messages
+
+```swift Group.swift:352-362
+let messageBytes = // received from push notification
+
+if let message = try await group.processMessage(messageBytes: messageBytes) {
+    print("Processed: \(message.content())")
+}
+```
+
+### Get HMAC Keys
+
+For push notification encryption:
+
+```swift Group.swift:817-840
+let hmacKeys = try group.getHmacKeys()
+
+// Use keys for push notification setup
+for (topic, keys) in hmacKeys.hmacKeys {
+    print("Topic: \(topic)")
+    for key in keys.values {
+        print("  Key: \(key.hmacKey.toHex)")
+    }
+}
+```
+
+### Get Push Topics
+
+```swift Group.swift:842-844
+let topics = try group.getPushTopics()
+
+print("Subscribe to topics: \(topics)")
+```
+
+### Debug Information
+
+```swift Group.swift:846-850
+let debugInfo = try await group.getDebugInformation()
+
+print("Group Debug Info:")
+print(debugInfo)
+```
+
+### Check Fork Status
+
+```swift Group.swift:531-537
+let forkStatus = group.commitLogForkStatus()
+
+switch forkStatus {
+case .forked:
+    print("Warning: Group has forked")
+case .notForked:
+    print("Group is synchronized")
+case .unknown:
+    print("Status unknown")
+}
+```
+
+### Get Read Receipts
+
+```swift Group.swift:852-854
+let readTimes = try group.getLastReadTimes()
+
+for (inboxId, timestamp) in readTimes {
+    print("\(inboxId) last read at: \(timestamp)")
+}
+```
+
+## Group Deletion
+
+### Delete Messages
+
+```swift Group.swift:860-866
+// Delete a specific message
+let deletionId = try await group.deleteMessage(messageId: messageId)
+
+print("Message deleted with ID: \(deletionId)")
+```
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Sync before operations">
+    Always sync the group before performing operations:
+    
+    ```swift
+    try await group.sync()
+    
+    // Now safe to access current state
+    let members = try await group.members
+    let isAdmin = try group.isAdmin(inboxId: myInboxId)
+    ```
+  </Accordion>
+
+  <Accordion title="Handle permission errors">
+    Check permissions before attempting operations:
+    
+    ```swift
+    if try group.isAdmin(inboxId: client.inboxID) {
+        try await group.addMembers(inboxIds: [newMember])
+    } else {
+        print("Not authorized to add members")
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="Use admin-only for sensitive groups">
+    For sensitive groups, use admin-only permissions:
+    
+    ```swift
+    let group = try await client.conversations.newGroup(
+        with: memberIds,
+        permissions: .adminOnly
+    )
+    ```
+  </Accordion>
+
+  <Accordion title="Provide group context">
+    Set meaningful names and descriptions:
+    
+    ```swift
+    let group = try await client.conversations.newGroup(
+        with: members,
+        groupName: "Engineering Team",
+        groupDescription: "Daily standup and project coordination",
+        groupImageUrlSquare: teamLogoUrl
+    )
+    ```
+  </Accordion>
+
+  <Accordion title="Handle membership changes">
+    Listen for membership update messages:
+    
+    ```swift
+    Client.register(codec: GroupUpdatedCodec())
+    
+    let messages = try await group.messages()
+    
+    for message in messages {
+        if message.contentTypeId == ContentTypeGroupUpdated {
+            let update: GroupUpdated = try message.content()
+            print("Added: \(update.addedInboxes)")
+            print("Removed: \(update.removedInboxes)")
+        }
+    }
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Examples
+
+### Create Team Workspace
+
+```swift
+func createTeamWorkspace(
+    name: String,
+    members: [String],
+    admins: [String]
+) async throws -> Group {
+    // Create group with admin-only permissions
+    let group = try await client.conversations.newGroup(
+        with: members,
+        permissions: .adminOnly,
+        groupName: name,
+        groupDescription: "Team collaboration space"
+    )
+    
+    // Promote specified users to admin
+    for adminInboxId in admins {
+        try await group.addAdmin(inboxId: adminInboxId)
+    }
+    
+    // Enable disappearing messages (7 days)
+    let settings = DisappearingMessageSettings(
+        disappearStartingAtNs: Date().millisecondsSinceEpoch,
+        retentionDurationInNs: 7 * 24 * 60 * 60 * 1_000_000_000
+    )
+    try await group.updateDisappearingMessageSettings(settings)
+    
+    return group
+}
+```
+
+### Monitor Group Activity
+
+```swift
+class GroupMonitor {
+    let group: Group
+    private var streamTask: Task<Void, Never>?
+    
+    init(group: Group) {
+        self.group = group
+    }
+    
+    func startMonitoring() {
+        streamTask = Task {
+            let stream = group.streamMessages()
+            
+            for try await message in stream {
+                await handleMessage(message)
+            }
+        }
+    }
+    
+    func handleMessage(_ message: DecodedMessage) async {
+        // Handle different message types
+        switch message.contentTypeId {
+        case ContentTypeText:
+            let text: String = try! message.content()
+            print("Message: \(text)")
+            
+        case ContentTypeGroupUpdated:
+            try await group.sync()
+            let members = try await group.members
+            print("Members updated, count: \(members.count)")
+            
+        default:
+            print("Other message type")
+        }
+    }
+    
+    func stopMonitoring() {
+        group.endStream()
+        streamTask?.cancel()
+    }
+}
+```
+
+### Batch Member Management
+
+```swift
+func updateGroupMembers(
+    group: Group,
+    toAdd: [String],
+    toRemove: [String],
+    toPromote: [String]
+) async throws {
+    // Remove members first
+    if !toRemove.isEmpty {
+        try await group.removeMembers(inboxIds: toRemove)
+        print("Removed \(toRemove.count) members")
+    }
+    
+    // Add new members
+    if !toAdd.isEmpty {
+        let result = try await group.addMembers(inboxIds: toAdd)
+        print("Added \(result.addedMembers.count) members")
+        
+        if !result.failedMembers.isEmpty {
+            print("Failed to add: \(result.failedMembers)")
+        }
+    }
+    
+    // Promote to admin
+    for inboxId in toPromote {
+        try await group.addAdmin(inboxId: inboxId)
+    }
+    
+    // Sync to get latest state
+    try await group.sync()
+    
+    let finalMembers = try await group.members
+    print("Final member count: \(finalMembers.count)")
+}
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Direct Messages" icon="message" href="/guides/direct-messages">
+    Learn about one-on-one messaging
+  </Card>
+  <Card title="Sending Messages" icon="paper-plane" href="/guides/sending-messages">
+    Send messages in groups
+  </Card>
+  <Card title="Receiving Messages" icon="inbox" href="/guides/receiving-messages">
+    Handle incoming group messages
+  </Card>
+  <Card title="Content Types" icon="file-code" href="/guides/content-types">
+    Work with different message types
+  </Card>
+</CardGroup>

@@ -1,0 +1,416 @@
+---
+title: Fork Recovery
+description: Handle conversation state divergence and ensure message consistency
+---
+
+## Overview
+
+Fork recovery is a mechanism for handling conversation state divergence that can occur when devices have been offline or when there are network issues. It ensures all participants in a conversation maintain a consistent view of the conversation state.
+
+## What is a Fork?
+
+A "fork" in XMTP occurs when the commit log (conversation state history) diverges between participants. This can happen when:
+
+- A device is offline for an extended period
+- Network connectivity issues during message sync
+- Multiple devices make concurrent state changes
+- Encryption state becomes inconsistent
+
+## Fork Recovery Mechanism
+
+XMTP's fork recovery system automatically detects and resolves forks by:
+
+1. **Detecting forks**: Identifying when local state diverges from network state
+2. **Requesting recovery**: Asking other participants for missing state
+3. **Merging state**: Reconciling divergent histories
+4. **Restoring consistency**: Ensuring all devices converge to the same state
+
+## Fork Recovery Options
+
+Configure fork recovery when creating a client:
+
+```swift
+import XMTPiOS
+
+let forkRecoveryOptions = ForkRecoveryOptions(
+  enableRecoveryRequests: .all,              // When to request recovery
+  groupsToRequestRecovery: [],               // Specific groups (if using .allowlistedGroups)
+  disableRecoveryResponses: false,           // Whether to respond to recovery requests
+  workerIntervalNs: 60_000_000_000          // Check interval (60 seconds)
+)
+
+let options = ClientOptions(
+  api: .init(env: .production),
+  dbEncryptionKey: encryptionKey,
+  forkRecoveryOptions: forkRecoveryOptions
+)
+
+let client = try await Client.create(account: wallet, options: options)
+```
+
+## Fork Recovery Policy
+
+The `ForkRecoveryPolicy` determines when the client will request recovery:
+
+### None
+
+Disable fork recovery entirely:
+
+```swift
+let options = ForkRecoveryOptions(
+  enableRecoveryRequests: .none,
+  groupsToRequestRecovery: []
+)
+```
+
+<Warning>
+Only use `.none` if you have a specific reason to disable recovery. Most apps should use `.all`.
+</Warning>
+
+### All Groups (Recommended)
+
+Enable recovery for all conversations:
+
+```swift
+let options = ForkRecoveryOptions(
+  enableRecoveryRequests: .all,
+  groupsToRequestRecovery: []
+)
+```
+
+<Tip>
+This is the recommended setting for most applications to ensure consistency.
+</Tip>
+
+### Allowlisted Groups
+
+Enable recovery only for specific conversations:
+
+```swift
+let options = ForkRecoveryOptions(
+  enableRecoveryRequests: .allowlistedGroups,
+  groupsToRequestRecovery: [
+    "group_id_1",
+    "group_id_2"
+  ]
+)
+```
+
+Use this when:
+- You have high-value conversations that need guaranteed consistency
+- You want to minimize network traffic for less important chats
+- You have specific compliance requirements
+
+## Configuration Parameters
+
+### enableRecoveryRequests
+
+```swift
+public enum ForkRecoveryPolicy {
+  case none              // Disable recovery requests
+  case allowlistedGroups // Only for specified groups
+  case all              // For all groups (recommended)
+}
+```
+
+### groupsToRequestRecovery
+
+Array of group IDs to request recovery for (only used with `.allowlistedGroups`):
+
+```swift
+let groupsToRecover = [
+  group1.id,
+  group2.id
+]
+
+let options = ForkRecoveryOptions(
+  enableRecoveryRequests: .allowlistedGroups,
+  groupsToRequestRecovery: groupsToRecover
+)
+```
+
+### disableRecoveryResponses
+
+Whether this client should respond to recovery requests from others:
+
+```swift
+let options = ForkRecoveryOptions(
+  enableRecoveryRequests: .all,
+  groupsToRequestRecovery: [],
+  disableRecoveryResponses: false  // Set true to not respond to others
+)
+```
+
+<Note>
+Leaving this `false` (default) helps the network by responding to recovery requests from other participants.
+</Note>
+
+### workerIntervalNs
+
+How often to check for and process forks (in nanoseconds):
+
+```swift
+let options = ForkRecoveryOptions(
+  enableRecoveryRequests: .all,
+  groupsToRequestRecovery: [],
+  workerIntervalNs: 60_000_000_000  // 60 seconds
+)
+```
+
+Common intervals:
+- `30_000_000_000` = 30 seconds (more responsive)
+- `60_000_000_000` = 60 seconds (balanced, default)
+- `300_000_000_000` = 5 minutes (battery-friendly)
+
+## Checking Fork Status
+
+Check if a conversation has a fork:
+
+```swift
+// Check group fork status
+let forkStatus = group.commitLogForkStatus()
+
+switch forkStatus {
+case .ok:
+  print("No fork detected")
+case .fork:
+  print("Fork detected - recovery may be in progress")
+}
+
+// For the unified Conversation enum
+let status = conversation.commitLogForkStatus()
+```
+
+## Handling Forks in Your App
+
+### Show Fork Status to Users
+
+```swift
+struct ConversationView: View {
+  let group: Group
+  @State private var hasFork = false
+  
+  var body: some View {
+    VStack {
+      if hasFork {
+        HStack {
+          Image(systemName: "exclamationmark.triangle")
+          Text("Syncing conversation...")
+        }
+        .padding()
+        .background(Color.orange.opacity(0.2))
+        .cornerRadius(8)
+      }
+      
+      // Rest of your UI
+    }
+    .onAppear {
+      checkForkStatus()
+    }
+  }
+  
+  func checkForkStatus() {
+    let status = group.commitLogForkStatus()
+    hasFork = (status == .fork)
+    
+    if hasFork {
+      // Fork detected, recovery should be automatic
+      // You can trigger a sync if needed
+      Task {
+        try? await group.sync()
+        
+        // Recheck after sync
+        await MainActor.run {
+          hasFork = (group.commitLogForkStatus() == .fork)
+        }
+      }
+    }
+  }
+}
+```
+
+### Automatic Recovery
+
+Fork recovery runs automatically in the background:
+
+```swift
+// Fork recovery happens automatically based on workerIntervalNs
+// You can manually trigger a sync to speed up recovery
+try await group.sync()
+
+// Check if fork is resolved
+let resolved = group.commitLogForkStatus() == .ok
+if resolved {
+  print("Fork recovered successfully")
+}
+```
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Use .all Policy for Most Apps">
+    - Ensures consistency across all conversations
+    - Automatically handles offline scenarios
+    - Minimal configuration required
+    - Best user experience
+  </Accordion>
+
+  <Accordion title="Sync After Returning Online">
+    - Call `sync()` when app returns from background
+    - Sync when network connectivity is restored
+    - This accelerates fork detection and recovery
+  </Accordion>
+
+  <Accordion title="Monitor Fork Status for Critical Conversations">
+    - Check fork status for important groups
+    - Show UI indicator during recovery
+    - Warn users if messages may be out of sync
+    - Don't allow critical actions during fork
+  </Accordion>
+
+  <Accordion title="Configure Worker Interval Appropriately">
+    - 30-60 seconds for responsive apps
+    - 5 minutes for battery-conscious apps
+    - Consider user activity patterns
+    - Balance responsiveness vs resource usage
+  </Accordion>
+
+  <Accordion title="Test Offline Scenarios">
+    - Test with airplane mode
+    - Test with poor connectivity
+    - Test with multiple devices offline
+    - Verify recovery works correctly
+  </Accordion>
+</AccordionGroup>
+
+## Troubleshooting
+
+### Fork Not Resolving
+
+If a fork persists:
+
+```swift
+// 1. Manually sync the conversation
+try await group.sync()
+
+// 2. Check if other participants are online
+let members = try await group.members
+for member in members {
+  print("Member: \(member.inboxId)")
+}
+
+// 3. Check fork recovery configuration
+if let forkOptions = clientOptions.forkRecoveryOptions {
+  print("Recovery enabled: \(forkOptions.enableRecoveryRequests)")
+  print("Worker interval: \(forkOptions.workerIntervalNs)ns")
+}
+
+// 4. Wait for worker interval to pass
+// Recovery is not instant - it runs on the worker schedule
+```
+
+### Performance Impact
+
+If fork recovery impacts performance:
+
+```swift
+// Increase worker interval
+let options = ForkRecoveryOptions(
+  enableRecoveryRequests: .all,
+  groupsToRequestRecovery: [],
+  workerIntervalNs: 300_000_000_000  // 5 minutes instead of 60 seconds
+)
+
+// Or use allowlisted groups for selective recovery
+let options = ForkRecoveryOptions(
+  enableRecoveryRequests: .allowlistedGroups,
+  groupsToRequestRecovery: criticalGroupIds
+)
+```
+
+## Example: Fork Recovery Manager
+
+```swift
+class ForkRecoveryManager {
+  private let client: Client
+  
+  init(client: Client) {
+    self.client = client
+  }
+  
+  /// Check fork status for all conversations
+  func checkAllConversations() async throws -> [String: CommitLogForkStatus] {
+    let conversations = try await client.conversations.list()
+    var statuses: [String: CommitLogForkStatus] = [:]
+    
+    for conversation in conversations {
+      let status = conversation.commitLogForkStatus()
+      statuses[conversation.id] = status
+    }
+    
+    return statuses
+  }
+  
+  /// Sync conversations with forks
+  func recoverForkedConversations() async throws {
+    let conversations = try await client.conversations.list()
+    
+    for conversation in conversations {
+      if conversation.commitLogForkStatus() == .fork {
+        print("Recovering fork in \(conversation.id)")
+        try await conversation.sync()
+        
+        // Verify recovery
+        if conversation.commitLogForkStatus() == .ok {
+          print("Successfully recovered \(conversation.id)")
+        } else {
+          print("Fork persists in \(conversation.id)")
+        }
+      }
+    }
+  }
+  
+  /// Monitor fork status
+  func monitorForForks() async {
+    while true {
+      do {
+        let statuses = try await checkAllConversations()
+        let forkedCount = statuses.values.filter { $0 == .fork }.count
+        
+        if forkedCount > 0 {
+          print("⚠️ \(forkedCount) conversations have forks")
+          try await recoverForkedConversations()
+        }
+      } catch {
+        print("Error monitoring forks: \(error)")
+      }
+      
+      // Check every 5 minutes
+      try? await Task.sleep(nanoseconds: 300_000_000_000)
+    }
+  }
+}
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Client Options" icon="gear" href="/api/client-options">
+    Configure fork recovery options
+  </Card>
+  <Card title="Conversations" icon="messages" href="/concepts/conversations">
+    Learn about conversation management
+  </Card>
+  <Card title="Syncing" icon="rotate" href="/guides/managing-conversations">
+    Best practices for syncing
+  </Card>
+  <Card title="Group API" icon="code" href="/api/group">
+    Group conversation methods
+  </Card>
+</CardGroup>
+
+## Related
+
+- [Encryption](/advanced/encryption) - Understanding MLS and encryption
+- [Managing Conversations](/guides/managing-conversations) - Conversation sync patterns
+- [Client Configuration](/api/client-options) - All client options

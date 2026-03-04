@@ -1,0 +1,421 @@
+---
+title: 'ReplyCodec'
+description: 'Codec for creating threaded message replies'
+icon: 'reply'
+---
+
+## Overview
+
+The `ReplyCodec` enables creating threaded conversations by allowing messages to reference and reply to previous messages. A reply contains both the original message reference and the reply content.
+
+<Info>
+Replies can contain any content type supported by XMTP, not just text. You can reply with attachments, reactions, or custom content types.
+</Info>
+
+## Content Type ID
+
+```swift
+ContentTypeReply = ContentTypeID(
+    authorityID: "xmtp.org",
+    typeID: "reply",
+    versionMajor: 1,
+    versionMinor: 0
+)
+```
+
+## Structure
+
+### Reply
+
+```swift
+public struct Reply {
+    public var reference: String
+    public var content: Any
+    public var contentType: ContentTypeID
+    public var inReplyTo: DecodedMessageV2?
+}
+```
+
+#### Properties
+
+<ParamField path="reference" type="String" required>
+  ID of the message being replied to
+</ParamField>
+
+<ParamField path="content" type="Any" required>
+  The content of the reply (can be any type supported by a registered codec)
+</ParamField>
+
+<ParamField path="contentType" type="ContentTypeID" required>
+  The content type ID of the reply content
+</ParamField>
+
+<ParamField path="inReplyTo" type="DecodedMessageV2?">
+  Optional reference to the original message being replied to
+</ParamField>
+
+## Usage
+
+### Registering the Codec
+
+```swift
+import XMTPiOS
+
+Client.register(codec: ReplyCodec())
+```
+
+### Replying to Messages
+
+#### Text Reply
+
+```swift
+// Get the message to reply to
+let messages = try await conversation.messages()
+let originalMessage = messages.first!
+
+// Create a text reply
+let reply = Reply(
+    reference: originalMessage.id,
+    content: "Thanks for the message!",
+    contentType: ContentTypeText
+)
+
+// Send the reply
+try await conversation.send(
+    content: reply,
+    options: .init(contentType: ContentTypeReply)
+)
+```
+
+#### Reply with Attachment
+
+```swift
+Client.register(codec: ReplyCodec())
+Client.register(codec: AttachmentCodec())
+
+let attachment = Attachment(
+    filename: "response.pdf",
+    mimeType: "application/pdf",
+    data: pdfData
+)
+
+let reply = Reply(
+    reference: originalMessage.id,
+    content: attachment,
+    contentType: ContentTypeAttachment
+)
+
+try await conversation.send(
+    content: reply,
+    options: .init(contentType: ContentTypeReply)
+)
+```
+
+### Receiving Replies
+
+```swift
+let messages = try await conversation.messages()
+
+for message in messages {
+    if message.contentTypeId == ContentTypeReply.id {
+        let reply: Reply = try message.content()
+        
+        print("Reply to message: \(reply.reference)")
+        print("Content type: \(reply.contentType)")
+        
+        // Decode the reply content based on its type
+        if reply.contentType == ContentTypeText {
+            let text = reply.content as? String
+            print("Reply text: \(text ?? "")")
+        } else if reply.contentType == ContentTypeAttachment {
+            let attachment = reply.content as? Attachment
+            print("Reply attachment: \(attachment?.filename ?? "")")
+        }
+    }
+}
+```
+
+### Accessing the Original Message
+
+```swift
+let reply: Reply = try message.content()
+
+// If available, access the original message
+if let originalMessage = reply.inReplyTo {
+    print("Original message ID: \(originalMessage.id)")
+    print("Original sender: \(originalMessage.senderAddress)")
+    
+    // Decode original content
+    let originalText: String = try originalMessage.content()
+    print("Original text: \(originalText)")
+}
+```
+
+## Implementation Details
+
+### Encoding
+
+The codec encodes the reply content using its associated codec:
+
+```swift
+public func encode(content reply: Reply) throws -> EncodedContent {
+    var encodedContent = EncodedContent()
+    let replyCodec = Client.codecRegistry.find(for: reply.contentType)
+    
+    encodedContent.type = contentType
+    encodedContent.parameters["reference"] = reply.reference
+    encodedContent.content = try encodeReply(
+        codec: replyCodec,
+        content: reply.content
+    ).serializedData()
+    
+    return encodedContent
+}
+```
+
+### Decoding
+
+The codec decodes the nested content using the appropriate codec:
+
+```swift
+public func decode(content: EncodedContent) throws -> Reply {
+    guard let reference = content.parameters["reference"] else {
+        throw CodecError.invalidContent
+    }
+    
+    let replyEncodedContent = try EncodedContent(serializedData: content.content)
+    let replyCodec = Client.codecRegistry.find(for: replyEncodedContent.type)
+    let replyContent = try replyCodec.decode(content: replyEncodedContent)
+    
+    return Reply(
+        reference: reference,
+        content: replyContent,
+        contentType: replyCodec.contentType
+    )
+}
+```
+
+### Fallback
+
+```swift
+public func fallback(content: Reply) throws -> String? {
+    "Replied with \"\(content.content)\" to an earlier message"
+}
+```
+
+### Push Notifications
+
+Replies trigger push notifications:
+
+```swift
+public func shouldPush(content: Reply) throws -> Bool {
+    true
+}
+```
+
+## Common Patterns
+
+### Building a Thread View
+
+```swift
+struct MessageThread {
+    let originalMessage: DecodedMessage
+    var replies: [DecodedMessage] = []
+}
+
+func buildThreads() async throws -> [MessageThread] {
+    let messages = try await conversation.messages()
+    var threads: [String: MessageThread] = [:]
+    
+    for message in messages {
+        if message.contentTypeId == ContentTypeReply.id {
+            let reply: Reply = try message.content()
+            
+            if threads[reply.reference] == nil {
+                // Find original message
+                if let original = messages.first(where: { $0.id == reply.reference }) {
+                    threads[reply.reference] = MessageThread(originalMessage: original)
+                }
+            }
+            
+            threads[reply.reference]?.replies.append(message)
+        } else {
+            // Non-reply message
+            if threads[message.id] == nil {
+                threads[message.id] = MessageThread(originalMessage: message)
+            }
+        }
+    }
+    
+    return Array(threads.values)
+}
+```
+
+### Quote Reply
+
+```swift
+func quoteReply(to message: DecodedMessage, withText text: String) async throws {
+    let originalText: String = try message.content()
+    let quotedText = """
+    > \(originalText)
+    
+    \(text)
+    """
+    
+    let reply = Reply(
+        reference: message.id,
+        content: quotedText,
+        contentType: ContentTypeText
+    )
+    
+    try await conversation.send(
+        content: reply,
+        options: .init(contentType: ContentTypeReply)
+    )
+}
+```
+
+### Count Replies
+
+```swift
+func countReplies(to messageId: String) async throws -> Int {
+    let messages = try await conversation.messages()
+    
+    return messages.filter { message in
+        guard message.contentTypeId == ContentTypeReply.id else { return false }
+        guard let reply: Reply = try? message.content() else { return false }
+        return reply.reference == messageId
+    }.count
+}
+```
+
+## Complete Example
+
+```swift
+import XMTPiOS
+
+class ThreadedConversation {
+    let conversation: Conversation
+    
+    func sendReply() async throws {
+        // Register codec
+        Client.register(codec: ReplyCodec())
+        
+        // Get message to reply to
+        let messages = try await conversation.messages()
+        guard let originalMessage = messages.first else { return }
+        
+        // Create reply
+        let reply = Reply(
+            reference: originalMessage.id,
+            content: "I agree with this!",
+            contentType: ContentTypeText
+        )
+        
+        // Send reply
+        try await conversation.send(
+            content: reply,
+            options: .init(contentType: ContentTypeReply)
+        )
+    }
+    
+    func displayThreads() async throws {
+        let messages = try await conversation.messages()
+        
+        // Organize into threads
+        var messageMap: [String: DecodedMessage] = [:]
+        var replyMap: [String: [DecodedMessage]] = [:]
+        
+        for message in messages {
+            if message.contentTypeId == ContentTypeReply.id {
+                let reply: Reply = try message.content()
+                replyMap[reply.reference, default: []].append(message)
+            } else {
+                messageMap[message.id] = message
+            }
+        }
+        
+        // Display threads
+        for (messageId, message) in messageMap {
+            let text: String = try message.content()
+            print("📨 \(text)")
+            
+            if let replies = replyMap[messageId] {
+                for replyMessage in replies {
+                    let reply: Reply = try replyMessage.content()
+                    if let replyText = reply.content as? String {
+                        print("  ↳ \(replyText)")
+                    }
+                }
+            }
+        }
+    }
+    
+    func replyWithAttachment(to messageId: String) async throws {
+        Client.register(codec: ReplyCodec())
+        Client.register(codec: AttachmentCodec())
+        
+        // Create attachment
+        let imageData = UIImage(named: "screenshot")!.jpegData(compressionQuality: 0.8)!
+        let attachment = Attachment(
+            filename: "screenshot.jpg",
+            mimeType: "image/jpeg",
+            data: imageData
+        )
+        
+        // Create reply with attachment
+        let reply = Reply(
+            reference: messageId,
+            content: attachment,
+            contentType: ContentTypeAttachment
+        )
+        
+        try await conversation.send(
+            content: reply,
+            options: .init(contentType: ContentTypeReply)
+        )
+    }
+}
+```
+
+## Best Practices
+
+<Tip>
+**Validate References**: Always verify that the referenced message exists before displaying replies.
+</Tip>
+
+<Tip>
+**Handle Any Content Type**: Replies can contain any registered content type. Ensure your app can handle all types you support.
+</Tip>
+
+<Tip>
+**Thread Depth**: Consider limiting thread depth (e.g., no replies to replies) to avoid deeply nested conversations.
+</Tip>
+
+## Error Handling
+
+Common errors when working with replies:
+
+```swift
+do {
+    let reply: Reply = try message.content()
+    // Process reply
+} catch CodecError.invalidContent {
+    print("Reply is missing required fields")
+} catch CodecError.codecNotFound {
+    print("Reply content type codec not registered")
+} catch {
+    print("Error decoding reply: \(error)")
+}
+```
+
+## Related
+
+- [ReactionCodec](/api/codecs/reaction) - For emoji reactions
+- [TextCodec](/api/codecs/text) - For text content
+- [AttachmentCodec](/api/codecs/attachment) - For file attachments
+- [ContentCodec Protocol](/api/content-codec) - Base protocol for all codecs
+
+## Source
+
+- [ReplyCodec.swift](https://github.com/xmtp/xmtp-ios/blob/main/Sources/XMTPiOS/Codecs/ReplyCodec.swift)

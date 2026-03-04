@@ -1,0 +1,352 @@
+---
+title: XMTP Environments
+description: Understanding XMTP network environments and when to use each
+---
+
+## Overview
+
+XMTP provides three network environments for different stages of development and deployment. Each environment is a separate network with its own infrastructure, data, and user base.
+
+## Available Environments
+
+### Production
+
+The live XMTP network for production applications.
+
+```swift
+let options = ClientOptions(
+  api: .init(env: .production),
+  dbEncryptionKey: encryptionKey
+)
+```
+
+**Host**: `grpc.production.xmtp.network:443`  
+**History Sync**: `https://message-history.production.ephemera.network`
+
+<Note>
+Use `.production` for all live, user-facing applications.
+</Note>
+
+### Development
+
+A testing environment for development and QA.
+
+```swift
+let options = ClientOptions(
+  api: .init(env: .dev),
+  dbEncryptionKey: encryptionKey
+)
+```
+
+**Host**: `grpc.dev.xmtp.network:443`  
+**History Sync**: `https://message-history.dev.ephemera.network`
+
+<Tip>
+Use `.dev` during development to avoid polluting the production network with test data.
+</Tip>
+
+### Local
+
+A local XMTP node running on your machine or network.
+
+```swift
+let options = ClientOptions(
+  api: .init(env: .local),
+  dbEncryptionKey: encryptionKey
+)
+```
+
+**Default Host**: `localhost:5556`  
+**Default History Sync**: `http://localhost:5558`
+
+<Warning>
+Local environment uses HTTP instead of HTTPS. Only use for local development.
+</Warning>
+
+## Environment Comparison
+
+| Feature | Production | Development | Local |
+|---------|-----------|-------------|-------|
+| **Use Case** | Live apps | Testing | Local dev |
+| **Transport** | HTTPS | HTTPS | HTTP |
+| **Data Persistence** | Permanent | Temporary | Temporary |
+| **Network Stability** | High | Moderate | Variable |
+| **Reset Frequency** | Never | Periodic | As needed |
+| **User Data** | Real users | Test accounts | Local only |
+
+## Switching Environments
+
+### At Build Time
+
+Use build configurations to switch environments:
+
+```swift
+import XMTPiOS
+
+#if DEBUG
+let environment: XMTPEnvironment = .dev
+#else
+let environment: XMTPEnvironment = .production
+#endif
+
+let options = ClientOptions(
+  api: .init(env: environment),
+  dbEncryptionKey: encryptionKey
+)
+```
+
+### Runtime Configuration
+
+Allow environment selection for testing:
+
+```swift
+enum AppEnvironment: String {
+  case production
+  case development
+  case local
+  
+  var xmtpEnvironment: XMTPEnvironment {
+    switch self {
+    case .production: return .production
+    case .development: return .dev
+    case .local: return .local
+    }
+  }
+}
+
+class Config {
+  static let environment: AppEnvironment = .init(
+    rawValue: ProcessInfo.processInfo.environment["APP_ENV"] ?? "production"
+  ) ?? .production
+}
+
+let client = try await Client.create(
+  account: wallet,
+  options: .init(
+    api: .init(env: Config.environment.xmtpEnvironment),
+    dbEncryptionKey: encryptionKey
+  )
+)
+```
+
+## Custom Environment Configuration
+
+### Custom Local Address
+
+Override the default local environment address:
+
+```swift
+// Set custom local address
+XMTPEnvironment.customLocalAddress = "192.168.1.100"
+
+// Or from environment variable
+if let nodeAddress = ProcessInfo.processInfo.environment["XMTP_NODE_ADDRESS"] {
+  XMTPEnvironment.customLocalAddress = nodeAddress
+}
+
+let client = try await Client.create(
+  account: wallet,
+  options: .init(
+    api: .init(env: .local),
+    dbEncryptionKey: encryptionKey
+  )
+)
+```
+
+### Custom History Sync URL
+
+Override the history sync server:
+
+```swift
+XMTPEnvironment.customHistorySyncUrl = "http://192.168.1.100:5558"
+
+let options = ClientOptions(
+  api: .init(env: .local),
+  dbEncryptionKey: encryptionKey,
+  historySyncUrl: XMTPEnvironment.local.getHistorySyncUrl()
+)
+```
+
+### Using Environment Variables
+
+Configure via environment variables:
+
+```swift
+// Read from environment
+if let nodeAddress = getLocalAddressFromEnvironment() {
+  XMTPEnvironment.customLocalAddress = nodeAddress
+}
+
+if let historyUrl = getHistorySyncUrlFromEnvironment() {
+  XMTPEnvironment.customHistorySyncUrl = historyUrl
+}
+```
+
+Set environment variables in Xcode:
+1. Edit your scheme
+2. Go to Run → Arguments
+3. Add environment variables:
+   - `XMTP_NODE_ADDRESS=192.168.1.100`
+   - `XMTP_HISTORY_SERVER_ADDRESS=http://192.168.1.100:5558`
+
+## Running a Local Node
+
+### Using Docker
+
+```bash
+# Clone the XMTP node repository
+git clone https://github.com/xmtp/xmtp-node-go
+cd xmtp-node-go
+
+# Start the local node
+docker-compose up
+```
+
+The node will be available at `localhost:5556`.
+
+### Using the Dev Script
+
+The SDK includes a script for local development:
+
+```bash
+cd xmtp-ios
+./script/local
+```
+
+This starts a local XMTP node with Docker.
+
+## Environment URLs
+
+Get environment URLs programmatically:
+
+```swift
+let env: XMTPEnvironment = .production
+
+print("URL: \(env.url)")
+print("Is Secure: \(env.isSecure)")
+print("History Sync: \(env.getHistorySyncUrl())")
+```
+
+## Data Isolation
+
+<Warning>
+**Important**: Data is completely isolated between environments.
+- An inbox ID created in dev is different from production
+- Messages sent in one environment don't appear in others
+- You need separate clients for each environment
+- Don't mix environment data in your app
+</Warning>
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Use Appropriate Environments">
+    - **Production**: Only for released apps with real users
+    - **Dev**: For all testing, staging, and QA
+    - **Local**: For offline development and debugging
+  </Accordion>
+
+  <Accordion title="Separate Test Accounts">
+    - Use different wallet addresses for each environment
+    - Don't use production wallets in dev/local
+    - Create dedicated test wallets
+    - Document test account credentials securely
+  </Accordion>
+
+  <Accordion title="Environment-Specific Builds">
+    - Use build configurations (Debug/Release)
+    - Show environment indicator in dev builds
+    - Prevent production builds from using dev environment
+    - Add environment info to crash reports
+  </Accordion>
+
+  <Accordion title="Database Management">
+    - Use separate database locations per environment
+    - Clear local databases when switching environments
+    - Don't copy databases between environments
+    - Backup production databases separately
+  </Accordion>
+</AccordionGroup>
+
+## Environment Indicator UI
+
+Show current environment in debug builds:
+
+```swift
+struct EnvironmentBanner: View {
+  let environment: XMTPEnvironment
+  
+  var body: some View {
+    #if DEBUG
+    if environment != .production {
+      HStack {
+        Image(systemName: "exclamationmark.triangle")
+        Text(environment == .dev ? "DEV" : "LOCAL")
+      }
+      .font(.caption)
+      .padding(.horizontal, 8)
+      .padding(.vertical, 4)
+      .background(environment == .dev ? Color.orange : Color.purple)
+      .foregroundColor(.white)
+      .cornerRadius(4)
+    }
+    #endif
+  }
+}
+```
+
+## Troubleshooting
+
+### Connection Issues
+
+```swift
+do {
+  let client = try await Client.create(account: wallet, options: options)
+} catch {
+  if error.localizedDescription.contains("connection") {
+    print("Check network connectivity")
+    print("Environment: \(options.api.env.url)")
+    print("Is secure: \(options.api.isSecure)")
+  }
+}
+```
+
+### Local Node Not Running
+
+```bash
+# Check if Docker containers are running
+docker ps | grep xmtp
+
+# Start local node
+cd xmtp-ios
+./script/local
+
+# Check logs
+docker logs xmtp-node
+```
+
+### Wrong Environment
+
+If you see unexpected behavior, verify the environment:
+
+```swift
+let client = try await Client.create(account: wallet, options: options)
+print("Connected to: \(client.environment.url)")
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Client Options" icon="gear" href="/api/client-options">
+    Configure client for different environments
+  </Card>
+  <Card title="Creating a Client" icon="rocket" href="/guides/creating-client">
+    Set up client with environment
+  </Card>
+  <Card title="Environment API" icon="code" href="/api/environment">
+    XMTPEnvironment API reference
+  </Card>
+  <Card title="Encryption" icon="lock" href="/advanced/encryption">
+    Security across environments
+  </Card>
+</CardGroup>

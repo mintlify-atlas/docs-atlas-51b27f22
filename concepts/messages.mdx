@@ -1,0 +1,471 @@
+---
+title: Messages
+description: Understanding message structure, sending, and receiving in XMTP
+---
+
+## Overview
+
+Messages are the fundamental unit of communication in XMTP. Every message is end-to-end encrypted, has a unique identifier, and contains content that can be decoded using the appropriate codec.
+
+## Message Structure
+
+### DecodedMessage
+
+When you retrieve messages from XMTP, they come as `DecodedMessage` objects:
+
+```swift
+public struct DecodedMessage {
+  let id: String                    // Unique message ID
+  let conversationId: String        // Conversation this message belongs to
+  let senderInboxId: String        // Inbox ID of sender
+  let sentAt: Date                 // When message was sent
+  let deliveryStatus: MessageDeliveryStatus
+  // ... more properties
+}
+```
+
+### Message Content
+
+Access message content using the `content()` method:
+
+```swift
+let message = messages.first!
+
+// Type-safe content access
+let text: String = try message.content()
+print("Message: \(text)")
+
+// Or use body property for convenience
+print("Message: \(message.body)")
+```
+
+## Sending Messages
+
+### Basic Text Messages
+
+Send simple text messages:
+
+```swift
+// In a group
+try await group.send(content: "Hello, everyone!")
+
+// In a DM
+try await dm.send(content: "Hi there!")
+```
+
+### Messages with Content Types
+
+Send different types of content using codecs:
+
+```swift
+// Send a reaction
+let reaction = Reaction(
+  reference: messageId,
+  action: .added,
+  schema: .unicode,
+  content: "👍"
+)
+try await group.send(content: reaction, options: .init(contentType: ContentTypeReaction))
+
+// Send a reply
+let reply = Reply(
+  reference: messageId,
+  content: "That's a great idea!"
+)
+try await group.send(content: reply, options: .init(contentType: ContentTypeReply))
+
+// Send an attachment
+let attachment = Attachment(
+  filename: "photo.jpg",
+  mimeType: "image/jpeg",
+  data: imageData
+)
+try await group.send(content: attachment, options: .init(contentType: ContentTypeAttachment))
+```
+
+### Send Options
+
+Customize message sending with `SendOptions`:
+
+```swift
+let options = SendOptions(
+  compression: .gzip,              // Compress content
+  contentType: ContentTypeText,    // Specify content type
+  contentFallback: "[Unsupported]" // Fallback for old clients
+)
+
+try await group.send(content: myContent, options: options)
+```
+
+## Receiving Messages
+
+### Fetching Message History
+
+Retrieve past messages from a conversation:
+
+```swift
+// Get all messages
+let messages = try await group.messages()
+
+// Get messages with filters
+let recentMessages = try await group.messages(
+  after: Date().addingTimeInterval(-86400), // Last 24 hours
+  before: Date(),
+  limit: 50,
+  direction: .descending
+)
+```
+
+### Enriched Messages
+
+Get messages with reactions and additional metadata:
+
+```swift
+let enrichedMessages = try await group.enrichedMessages()
+
+for message in enrichedMessages {
+  print("Message: \(message.body)")
+  
+  // Access reactions
+  for reaction in message.reactions {
+    print("Reaction: \(reaction.content)")
+  }
+}
+```
+
+<Tip>
+Use `enrichedMessages()` for UI display as it includes reactions and other metadata in a single query.
+</Tip>
+
+### Streaming New Messages
+
+Receive messages in real-time:
+
+```swift
+// Stream messages from a conversation
+for try await message in group.streamMessages() {
+  print("New message: \(message.body)")
+  print("From: \(message.senderInboxId)")
+  print("Sent at: \(message.sentAt)")
+}
+```
+
+### Streaming All Messages
+
+Stream messages from all conversations:
+
+```swift
+for try await message in client.conversations.streamAllMessages() {
+  print("Message in \(message.conversationId): \(message.body)")
+}
+```
+
+## Message Properties
+
+### Identifiers
+
+```swift
+let id: String                  // Unique message ID
+let conversationId: String      // Parent conversation
+let topic: String               // Message topic
+```
+
+### Sender Information
+
+```swift
+let senderInboxId: String       // Sender's inbox ID
+```
+
+### Timestamps
+
+```swift
+let sentAt: Date               // When message was sent
+let sentAtNs: Int64           // Nanosecond precision
+let insertedAt: Date          // When inserted in local DB
+let insertedAtNs: Int64       // Nanosecond precision
+```
+
+### Delivery Status
+
+```swift
+enum MessageDeliveryStatus {
+  case published      // Successfully sent
+  case unpublished    // Pending send
+  case failed        // Send failed
+}
+
+let status = message.deliveryStatus
+if status == .failed {
+  print("Message failed to send")
+}
+```
+
+### Content Access
+
+```swift
+// Type-safe content decoding
+let text: String = try message.content()
+
+// Convenience property for text
+let body = message.body
+
+// Fallback text
+let fallback = message.fallback
+
+// Content type
+let contentTypeId = message.contentTypeId
+```
+
+## Message Filtering
+
+### By Time Range
+
+```swift
+let messages = try await group.messages(
+  after: startDate,
+  before: endDate
+)
+```
+
+### By Delivery Status
+
+```swift
+let failedMessages = try await group.messages(
+  deliveryStatus: .failed
+)
+```
+
+### By Content Type
+
+```swift
+let reactions = try await group.messages(
+  contentType: ContentTypeReaction
+)
+```
+
+### By Sender
+
+```swift
+let myMessages = messages.filter { $0.senderInboxId == client.inboxID }
+```
+
+## Message Pagination
+
+```swift
+func loadMessages(limit: Int = 50, before: Date? = nil) async throws -> [DecodedMessage] {
+  let messages = try await group.messages(
+    before: before ?? Date(),
+    limit: limit,
+    direction: .descending
+  )
+  return messages
+}
+
+// Load first page
+let page1 = try await loadMessages()
+
+// Load next page
+if let oldestMessage = page1.last {
+  let page2 = try await loadMessages(before: oldestMessage.sentAt)
+}
+```
+
+## Disappearing Messages
+
+Messages can be configured to automatically expire:
+
+```swift
+// Check if message has expiration
+if let expiresAt = message.expiresAt {
+  print("Message expires at: \(expiresAt)")
+  
+  let now = Date()
+  if now > expiresAt {
+    print("Message has expired")
+  }
+}
+```
+
+## Message Deletion
+
+Delete messages locally:
+
+```swift
+// Delete specific message
+try await group.deleteMessage(messageId)
+
+// Through conversations API
+try await client.conversations.deleteMessageLocally(messageId)
+```
+
+<Warning>
+Message deletion only removes the message from your local database. Other participants will still see the message.
+</Warning>
+
+## Message Count
+
+Get message counts:
+
+```swift
+// Total message count
+let totalCount = try await group.countMessages()
+
+// Count with filters
+let recentCount = try await group.countMessages(
+  after: Date().addingTimeInterval(-86400)
+)
+```
+
+## Prepare and Publish Pattern
+
+For offline support, prepare messages while offline and publish when online:
+
+```swift
+// Prepare message while offline
+let preparedId = try await group.prepareMessage(content: "Hello!")
+
+// Later, when online, publish prepared messages
+try await group.publishMessages()
+
+// Or publish a specific message
+try await group.publishMessage(messageId: preparedId)
+```
+
+## Last Message
+
+Get the most recent message in a conversation:
+
+```swift
+let lastMessage = try await group.lastMessage()
+if let message = lastMessage {
+  print("Last: \(message.body) at \(message.sentAt)")
+}
+```
+
+## Finding Messages
+
+```swift
+// Find message by ID
+let message = try await client.conversations.findMessage(messageId)
+
+// Find enriched message by ID
+let enrichedMessage = try await client.conversations.findEnrichedMessage(messageId)
+```
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Use Enriched Messages for UI">
+    - Use `enrichedMessages()` instead of `messages()` for display
+    - Enriched messages include reactions and metadata
+    - Reduces number of queries needed
+    - Better performance for UI rendering
+  </Accordion>
+
+  <Accordion title="Implement Pagination">
+    - Load messages in chunks (e.g., 50 at a time)
+    - Use time-based pagination with `before` parameter
+    - Implement infinite scroll in your UI
+    - Cache loaded messages locally
+  </Accordion>
+
+  <Accordion title="Stream for Real-time Updates">
+    - Use streaming for active conversations
+    - Start streaming when conversation view is opened
+    - Stop streaming with `endStream()` when view closes
+    - Handle stream errors and reconnection
+  </Accordion>
+
+  <Accordion title="Handle Content Types Gracefully">
+    - Check content type before decoding
+    - Use fallback text for unknown types
+    - Display appropriate UI for each content type
+    - Register all needed codecs at startup
+  </Accordion>
+
+  <Accordion title="Optimize Message Loading">
+    - Load recent messages first
+    - Use lazy loading for older messages
+    - Cache message content
+    - Compress large content
+  </Accordion>
+</AccordionGroup>
+
+## Example: Message List View
+
+```swift
+class MessageListViewModel: ObservableObject {
+  @Published var messages: [DecodedMessage] = []
+  private let group: Group
+  private var streamTask: Task<Void, Never>?
+  
+  init(group: Group) {
+    self.group = group
+  }
+  
+  func loadMessages() async {
+    do {
+      // Load recent messages
+      messages = try await group.enrichedMessages(
+        limit: 50,
+        direction: .descending
+      )
+      
+      // Start streaming new messages
+      startStreaming()
+    } catch {
+      print("Error loading messages: \(error)")
+    }
+  }
+  
+  func startStreaming() {
+    streamTask = Task {
+      do {
+        for try await message in group.streamMessages() {
+          await MainActor.run {
+            messages.insert(message, at: 0)
+          }
+        }
+      } catch {
+        print("Stream error: \(error)")
+      }
+    }
+  }
+  
+  func stopStreaming() {
+    streamTask?.cancel()
+    group.endStream()
+  }
+  
+  func sendMessage(_ text: String) async {
+    do {
+      try await group.send(content: text)
+    } catch {
+      print("Error sending: \(error)")
+    }
+  }
+}
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Sending Messages" icon="paper-plane" href="/guides/sending-messages">
+    Learn how to send different types of messages
+  </Card>
+  <Card title="Receiving Messages" icon="inbox" href="/guides/receiving-messages">
+    Handle incoming messages in your app
+  </Card>
+  <Card title="Content Types" icon="code" href="/concepts/codecs">
+    Understand codecs and content types
+  </Card>
+  <Card title="Messages API" icon="code" href="/api/messages">
+    Complete messages API reference
+  </Card>
+</CardGroup>
+
+## Related
+
+- [DecodedMessage API](/api/decoded-message) - Message object reference
+- [Content Types Guide](/guides/content-types) - Working with different content types
+- [Streaming](/guides/receiving-messages#streaming-messages) - Real-time message streaming

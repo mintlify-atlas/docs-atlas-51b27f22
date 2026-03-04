@@ -1,0 +1,439 @@
+---
+title: Creating a Client
+description: Learn how to create and configure an XMTP iOS client
+---
+
+The XMTP client is your app's gateway to the XMTP network. It handles authentication, message encryption, and all network operations.
+
+## Prerequisites
+
+Before creating a client, ensure you have:
+
+- A signing key (wallet) that conforms to the `SigningKey` protocol
+- An encryption key for the local database
+- Chosen an XMTP environment (dev, production, or local)
+
+## Creating a Client
+
+There are two main methods for creating a client:
+
+### Using Client.create()
+
+`Client.create()` is the recommended method for most use cases. It creates a fully authenticated client that's ready to send and receive messages.
+
+<Steps>
+
+<Step title="Generate an encryption key">
+
+First, generate a secure encryption key for the local database:
+
+```swift Client.swift:14
+import XMTPiOS
+
+let encryptionKey = try Crypto.secureRandomBytes(count: 32)
+```
+
+</Step>
+
+<Step title="Configure client options">
+
+Set up your client configuration:
+
+```swift Client.swift:75-101
+let clientOptions = ClientOptions(
+    api: ClientOptions.Api(
+        env: .production,  // or .dev for development
+        isSecure: true,
+        appVersion: "MyApp/1.0.0"  // Optional
+    ),
+    dbEncryptionKey: encryptionKey
+)
+```
+
+</Step>
+
+<Step title="Create the client">
+
+Create the client with your signing key:
+
+```swift Client.swift:271-287
+let client = try await Client.create(
+    account: signingKey,
+    options: clientOptions
+)
+```
+
+This will:
+- Generate or retrieve an inbox ID for the account
+- Request a signature from the wallet to authenticate
+- Register the installation on the XMTP network
+- Initialize the local encrypted database
+
+</Step>
+
+</Steps>
+
+### Using Client.build()
+
+`Client.build()` creates a client without signing, useful for read-only operations or when you want to defer authentication.
+
+```swift Client.swift:289-311
+let client = try await Client.build(
+    publicIdentity: publicIdentity,
+    options: clientOptions,
+    inboxId: existingInboxId  // Optional
+)
+```
+
+<Warning>
+`Client.build()` creates a limited client that cannot send messages or perform authenticated operations until signed in.
+</Warning>
+
+## Configuration Options
+
+### Environment Setup
+
+Choose the appropriate network environment:
+
+```swift XMTPEnvironment.swift:19-23
+public enum XMTPEnvironment: String {
+    case dev = "grpc.dev.xmtp.network"
+    case production = "grpc.production.xmtp.network"
+    case local = "localhost"
+}
+```
+
+- **`production`**: Use for production apps
+- **`dev`**: Use during development and testing
+- **`local`**: Use for local node development
+
+### Client Options
+
+All available configuration options:
+
+```swift Client.swift:116-141
+let options = ClientOptions(
+    api: ClientOptions.Api(
+        env: .production,
+        isSecure: true,
+        appVersion: "MyApp/1.0.0",
+        gatewayHost: nil  // Optional custom gateway
+    ),
+    codecs: [AttachmentCodec(), ReactionCodec()],  // Register custom codecs
+    preAuthenticateToInboxCallback: {
+        // Called before signature request
+        print("About to request signature")
+    },
+    dbEncryptionKey: encryptionKey,
+    dbDirectory: customDirectory,  // Optional custom database location
+    historySyncUrl: nil,  // Optional custom history sync URL
+    deviceSyncEnabled: true,  // Enable multi-device sync
+    debugEventsEnabled: false  // Enable debug logging
+)
+```
+
+### Database Configuration
+
+#### Custom Database Location
+
+Specify a custom directory for the database:
+
+```swift Client.swift:351-373
+let customDirectory = FileManager.default.urls(
+    for: .applicationSupportDirectory,
+    in: .userDomainMask
+).first?.path
+
+let options = ClientOptions(
+    api: .init(env: .production),
+    dbEncryptionKey: encryptionKey,
+    dbDirectory: customDirectory
+)
+```
+
+#### Database Encryption
+
+The encryption key must be 32 bytes and should be securely stored:
+
+```swift
+// Generate a new key
+let encryptionKey = try Crypto.secureRandomBytes(count: 32)
+
+// Store securely (e.g., in Keychain)
+let keychain = KeychainWrapper()
+try keychain.set(encryptionKey, forKey: "xmtp-db-key")
+
+// Retrieve for later use
+if let storedKey = try keychain.get(key: "xmtp-db-key") {
+    let client = try await Client.create(
+        account: signingKey,
+        options: .init(
+            api: .init(env: .production),
+            dbEncryptionKey: storedKey
+        )
+    )
+}
+```
+
+## Wallet Integration
+
+### Using a Private Key
+
+For development or testing:
+
+```swift
+import XMTPiOS
+import XMTPTestHelpers
+
+// Generate a new private key
+let privateKey = try PrivateKey.generate()
+
+// Create client
+let client = try await Client.create(
+    account: privateKey,
+    options: clientOptions
+)
+```
+
+### Implementing SigningKey Protocol
+
+For production apps, implement the `SigningKey` protocol:
+
+```swift SigningKey.swift:8-23
+public protocol SigningKey {
+    var identity: PublicIdentity { get }
+    var type: SignerType { get }
+    var chainId: Int64? { get }
+    var blockNumber: Int64? { get }
+    
+    func sign(_ message: String) async throws -> SignedData
+}
+```
+
+Example implementation with an Ethereum wallet:
+
+```swift
+import web3swift
+
+class EthereumSigningKey: SigningKey {
+    let wallet: Wallet
+    
+    var identity: PublicIdentity {
+        PublicIdentity(
+            kind: .ethereum,
+            identifier: wallet.address.lowercased()
+        )
+    }
+    
+    var type: SignerType { .EOA }
+    var chainId: Int64? { 1 }  // Ethereum mainnet
+    var blockNumber: Int64? { nil }
+    
+    func sign(_ message: String) async throws -> SignedData {
+        let signature = try await wallet.signMessage(message)
+        return SignedData(
+            rawData: signature,
+            recoverable: nil
+        )
+    }
+}
+
+// Use the signing key
+let signingKey = EthereumSigningKey(wallet: myWallet)
+let client = try await Client.create(
+    account: signingKey,
+    options: clientOptions
+)
+```
+
+### Smart Contract Wallets
+
+For smart contract wallets (SCW):
+
+```swift SigningKey.swift:3-5
+public enum SignerType {
+    case EOA, SCW
+}
+```
+
+```swift
+class SmartContractWallet: SigningKey {
+    var identity: PublicIdentity {
+        PublicIdentity(
+            kind: .ethereum,
+            identifier: contractAddress.lowercased()
+        )
+    }
+    
+    var type: SignerType { .SCW }
+    var chainId: Int64? { 1 }
+    var blockNumber: Int64? { deploymentBlock }
+    
+    func sign(_ message: String) async throws -> SignedData {
+        // Implement SCW-specific signing
+        let signature = try await signWithContract(message)
+        return SignedData(rawData: signature, recoverable: nil)
+    }
+}
+```
+
+## Error Handling
+
+Handle common client creation errors:
+
+```swift Client.swift:7-27
+do {
+    let client = try await Client.create(
+        account: signingKey,
+        options: clientOptions
+    )
+    print("Client created successfully")
+} catch ClientError.creationError(let message) {
+    print("Failed to create client: \(message)")
+} catch ClientError.missingInboxId {
+    print("Inbox ID is missing")
+} catch ClientError.invalidInboxId(let inboxId) {
+    print("Invalid inbox ID: \(inboxId)")
+} catch {
+    print("Unexpected error: \(error)")
+}
+```
+
+## Advanced Configuration
+
+### Pre-Authentication Callback
+
+Execute code before the wallet signature is requested:
+
+```swift Client.swift:107
+let options = ClientOptions(
+    api: .init(env: .production),
+    preAuthenticateToInboxCallback: {
+        // Show UI to user
+        await showSigningPrompt()
+        
+        // Log analytics
+        Analytics.track("signature_requested")
+    },
+    dbEncryptionKey: encryptionKey
+)
+```
+
+### History Sync Configuration
+
+Configure message history synchronization:
+
+```swift Client.swift:122-137
+let options = ClientOptions(
+    api: .init(env: .production),
+    dbEncryptionKey: encryptionKey,
+    historySyncUrl: "https://custom-history-server.com",
+    useDefaultHistorySyncUrl: false
+)
+```
+
+### Multi-Device Sync
+
+Enable or disable device synchronization:
+
+```swift Client.swift:124
+let options = ClientOptions(
+    api: .init(env: .production),
+    dbEncryptionKey: encryptionKey,
+    deviceSyncEnabled: true  // Enable sync across devices
+)
+```
+
+### Registering Content Codecs
+
+Register custom content types during client creation:
+
+```swift Client.swift:103-104
+let options = ClientOptions(
+    api: .init(env: .production),
+    codecs: [
+        AttachmentCodec(),
+        ReactionCodec(),
+        ReplyCodec(),
+        ReadReceiptCodec()
+    ],
+    dbEncryptionKey: encryptionKey
+)
+```
+
+Or register codecs globally:
+
+```swift Client.swift:200-202
+// Register once in your app
+Client.register(codec: AttachmentCodec())
+Client.register(codec: ReactionCodec())
+
+// Create client
+let client = try await Client.create(
+    account: signingKey,
+    options: clientOptions
+)
+```
+
+## Client Properties
+
+Access important client information:
+
+```swift Client.swift:175-196
+let inboxId = client.inboxID  // User's inbox identifier
+let installationId = client.installationID  // Device installation ID
+let libVersion = client.libXMTPVersion  // LibXMTP version
+let dbPath = client.dbPath  // Database file path
+let environment = client.environment  // Network environment
+let publicIdentity = client.publicIdentity  // User's public identity
+```
+
+## Checking Network Availability
+
+Before creating conversations, check if addresses can receive messages:
+
+```swift Client.swift:817-835
+// Check a single identity
+let canMessage = try await client.canMessage(
+    identity: recipientIdentity
+)
+
+if canMessage {
+    // Safe to create conversation
+}
+
+// Check multiple identities
+let identities = [identity1, identity2, identity3]
+let canMessageMap = try await client.canMessage(
+    identities: identities
+)
+
+for (address, canMessage) in canMessageMap {
+    print("\(address): \(canMessage)")
+}
+```
+
+## Static Methods
+
+Check message capability without creating a client:
+
+```swift Client.swift:635-647
+let canMessageMap = try await Client.canMessage(
+    accountIdentities: [
+        PublicIdentity(kind: .ethereum, identifier: "0x123..."),
+        PublicIdentity(kind: .ethereum, identifier: "0x456...")
+    ],
+    api: ClientOptions.Api(env: .production)
+)
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Managing Conversations" icon="comments" href="/guides/managing-conversations">
+    Learn how to list, sync, and filter conversations
+  </Card>
+  <Card title="Sending Messages" icon="paper-plane" href="/guides/sending-messages">
+    Start sending messages in your conversations
+  </Card>
+</CardGroup>

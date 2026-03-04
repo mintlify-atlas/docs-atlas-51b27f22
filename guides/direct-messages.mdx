@@ -1,0 +1,815 @@
+---
+title: Direct Messages
+description: Create and manage one-on-one conversations with DMs
+---
+
+Direct messages (DMs) provide private, one-on-one conversations between two participants. DMs are simpler than group chats but still support rich features like disappearing messages and content types.
+
+## Creating DMs
+
+### Create or Find a DM
+
+The recommended method creates a new DM or returns an existing one:
+
+```swift DmTests.swift:50-60
+let dm = try await client.conversations.findOrCreateDm(
+    with: recipientInboxId
+)
+
+print("DM ID: \(dm.id)")
+```
+
+This is idempotent - calling it multiple times with the same inbox ID returns the same DM.
+
+### Create with Identity
+
+Create a DM using a wallet address:
+
+```swift DmTests.swift:63-75
+let dm = try await client.conversations.findOrCreateDmWithIdentity(
+    with: PublicIdentity(
+        kind: .ethereum,
+        identifier: "0x123..."
+    )
+)
+```
+
+### Create New Conversation
+
+Force creation of a new conversation:
+
+```swift
+let dm = try await client.conversations.newConversation(
+    with: inboxId
+)
+```
+
+Or with identity:
+
+```swift
+let dm = try await client.conversations.newConversationWithIdentity(
+    with: identity
+)
+```
+
+## Finding Existing DMs
+
+### Find by Inbox ID
+
+```swift DmTests.swift:12-29
+let dm = try client.conversations.findDmByInboxId(
+    inboxId: peerInboxId
+)
+
+if let dm = dm {
+    print("Found DM: \(dm.id)")
+} else {
+    print("No DM exists with this inbox ID")
+}
+```
+
+### Find by Identity
+
+```swift DmTests.swift:31-48
+let dm = try await client.conversations.findDmByIdentity(
+    publicIdentity: PublicIdentity(
+        kind: .ethereum,
+        identifier: "0x456..."
+    )
+)
+
+if let dm = dm {
+    print("Found DM: \(dm.id)")
+}
+```
+
+## DM Properties
+
+### Basic Information
+
+```swift Dm.swift:26-106
+let dm = try await client.conversations.listDms().first!
+
+// Identifiers
+let id = dm.id
+let topic = dm.topic
+
+// Timestamps
+let createdAt = dm.createdAt
+let createdAtNs = dm.createdAtNs
+let lastActivityAtNs = dm.lastActivityAtNs
+
+// Peer information
+let peerInboxId = try dm.peerInboxId
+
+print("DM with: \(peerInboxId)")
+print("Created: \(createdAt)")
+```
+
+### Member Information
+
+```swift Dm.swift:78-85
+let members = try await dm.members
+
+for member in members {
+    print("Member: \(member.inboxId)")
+}
+
+// DMs always have exactly 2 members
+assert(members.count == 2)
+```
+
+### Creator Information
+
+```swift Dm.swift:62-76
+// Check if you created the DM
+let isCreator = try await dm.isCreator()
+
+// Get creator inbox ID
+let creatorInboxId = try await dm.creatorInboxId()
+
+// Get who added you
+let addedBy = try dm.addedByInboxId()
+
+print("Created by: \(creatorInboxId)")
+print("Added by: \(addedBy)")
+```
+
+## Messaging in DMs
+
+### Send Messages
+
+```swift Dm.swift:153-171
+// Send text message
+let messageId = try await dm.send(
+    content: "Hello!"
+)
+
+// Send with options
+let messageId = try await dm.send(
+    content: "Important message",
+    options: SendOptions(contentType: ContentTypeText)
+)
+```
+
+### Receive Messages
+
+```swift Dm.swift:334-407
+// Get message history
+let messages = try await dm.messages(
+    limit: 50,
+    direction: .descending
+)
+
+for message in messages {
+    print("\(message.senderInboxId): \(message.content())")
+}
+```
+
+### Stream New Messages
+
+```swift Dm.swift:274-305
+let stream = dm.streamMessages()
+
+for try await message in stream {
+    print("New message: \(message.content())")
+}
+```
+
+### Stop Streaming
+
+```swift Dm.swift:270-272
+dm.endStream()
+```
+
+### Get Last Message
+
+```swift Dm.swift:307-313
+if let lastMessage = try await dm.lastMessage() {
+    print("Last message: \(lastMessage.content())")
+    print("Sent at: \(lastMessage.sentAt)")
+}
+```
+
+## Message Management
+
+### Prepare and Publish
+
+For offline support:
+
+```swift Dm.swift:225-260
+// Prepare message without sending
+let messageId = try await dm.prepareMessage(
+    content: "Prepared message",
+    options: nil,
+    noSend: true
+)
+
+// Send later when online
+try await dm.publishMessage(messageId: messageId)
+
+// Or publish all prepared messages
+try await dm.publishMessages()
+```
+
+### Count Messages
+
+```swift Dm.swift:474-496
+let totalMessages = try dm.countMessages()
+print("Total messages: \(totalMessages)")
+
+// Count with filters
+let recentCount = try dm.countMessages(
+    afterNs: oneDayAgo,
+    deliveryStatus: .published
+)
+print("Recent messages: \(recentCount)")
+```
+
+### Delete Messages
+
+```swift Dm.swift:630-636
+// Delete a specific message
+let deletionId = try await dm.deleteMessage(messageId: messageId)
+
+print("Message deleted with ID: \(deletionId)")
+```
+
+## DM Status
+
+### Check Activity
+
+```swift Dm.swift:66-68
+let isActive = try dm.isActive()
+
+if isActive {
+    print("DM is active")
+} else {
+    print("DM has been closed")
+}
+```
+
+### Check Fork Status
+
+```swift Dm.swift:315-321
+let forkStatus = dm.commitLogForkStatus()
+
+switch forkStatus {
+case .forked:
+    print("Warning: DM has forked")
+case .notForked:
+    print("DM is synchronized")
+case .unknown:
+    print("Fork status unknown")
+}
+```
+
+### Check Pause Status
+
+```swift Dm.swift:137-140
+if let minVersion = try dm.pausedForVersion() {
+    print("DM is paused, requires SDK version: \(minVersion)")
+} else {
+    print("DM is not paused")
+}
+```
+
+## Consent Management
+
+### Get Consent State
+
+```swift Dm.swift:112-114
+let consentState = try dm.consentState()
+
+switch consentState {
+case .allowed:
+    print("DM is allowed")
+case .denied:
+    print("DM is blocked")
+case .unknown:
+    print("No preference set")
+}
+```
+
+### Update Consent
+
+```swift Dm.swift:108-110
+// Allow the DM
+try await dm.updateConsentState(state: .allowed)
+
+// Block the DM
+try await dm.updateConsentState(state: .denied)
+```
+
+### DM Consent Behavior
+
+DMs start with allowed consent state:
+
+```swift DmTests.swift:135-150
+let dm = try await client.conversations.findOrCreateDm(
+    with: recipientInboxId
+)
+
+let consentState = try dm.consentState()
+assert(consentState == .allowed)
+```
+
+## Disappearing Messages
+
+### Check if Enabled
+
+```swift Dm.swift:42-44
+let isEnabled = try dm.isDisappearingMessagesEnabled()
+
+if isEnabled {
+    let settings = dm.disappearingMessageSettings
+    print("Messages disappear after: \(settings?.retentionDurationInNs ?? 0) ns")
+}
+```
+
+### Configure Disappearing Messages
+
+```swift Dm.swift:116-131
+let settings = DisappearingMessageSettings(
+    disappearStartingAtNs: Date().millisecondsSinceEpoch,
+    retentionDurationInNs: 24 * 60 * 60 * 1_000_000_000  // 24 hours
+)
+
+try await dm.updateDisappearingMessageSettings(settings)
+```
+
+### Clear Disappearing Messages
+
+```swift Dm.swift:133-135
+try await dm.clearDisappearingMessageSettings()
+```
+
+## Syncing DMs
+
+### Sync Individual DM
+
+```swift Dm.swift:50-52
+try await dm.sync()
+
+// Now access updated data
+let messages = try await dm.messages()
+```
+
+### Process Streamed Messages
+
+```swift Dm.swift:142-151
+let messageBytes = // received from push notification
+
+if let message = try await dm.processMessage(messageBytes: messageBytes) {
+    print("Processed: \(message.content())")
+}
+```
+
+## Advanced Features
+
+### Get Enriched Messages
+
+Get messages with reactions and replies included:
+
+```swift Dm.swift:513-586
+let messages = try await dm.enrichedMessages(
+    limit: 50,
+    direction: .descending
+)
+
+for message in messages {
+    let text: String = try message.content()
+    
+    // Access enriched data
+    if let reactions = message.reactions {
+        print("Reactions: \(reactions)")
+    }
+    
+    if let reply = message.reply {
+        print("Reply to: \(reply.reference)")
+    }
+}
+```
+
+### Get Messages with Reactions
+
+```swift Dm.swift:409-471
+let messages = try await dm.messagesWithReactions(
+    limit: 50
+)
+```
+
+### Get HMAC Keys
+
+For push notification encryption:
+
+```swift Dm.swift:588-611
+let hmacKeys = try dm.getHmacKeys()
+
+for (topic, keys) in hmacKeys.hmacKeys {
+    print("Topic: \(topic)")
+    for key in keys.values {
+        print("  HMAC Key: \(key.hmacKey.toHex)")
+    }
+}
+```
+
+### Get Push Topics
+
+DMs may have multiple topics for duplicate detection:
+
+```swift Dm.swift:613-618
+let topics = try await dm.getPushTopics()
+
+print("Subscribe to topics: \(topics)")
+```
+
+### Debug Information
+
+```swift Dm.swift:620-624
+let debugInfo = try await dm.getDebugInformation()
+
+print("DM Debug Info:")
+print(debugInfo)
+```
+
+### Get Read Receipts
+
+```swift Dm.swift:626-628
+let readTimes = try dm.getLastReadTimes()
+
+for (inboxId, timestamp) in readTimes {
+    print("\(inboxId) last read at: \(timestamp)")
+}
+```
+
+## Filtering DMs
+
+### Filter by Consent State
+
+```swift DmTests.swift:152-186
+let allowedDms = try await client.conversations.listDms(
+    consentStates: [.allowed]
+)
+
+let deniedDms = try await client.conversations.listDms(
+    consentStates: [.denied]
+)
+
+let allDms = try await client.conversations.listDms(
+    consentStates: [.allowed, .denied]
+)
+```
+
+### Filter by Time
+
+```swift
+let recentDms = try await client.conversations.listDms(
+    createdAfterNs: oneDayAgo,
+    limit: 20
+)
+```
+
+### Sort DMs
+
+```swift DmTests.swift:188-200
+// Sort by last activity
+let activeFirst = try await client.conversations.listDms(
+    orderBy: .lastActivity
+)
+
+// Sort by creation time
+let newestFirst = try await client.conversations.listDms(
+    orderBy: .createdAt
+)
+```
+
+## Validation and Errors
+
+### Cannot DM Yourself
+
+```swift DmTests.swift:91-100
+// This will throw an error
+do {
+    let dm = try await client.conversations.findOrCreateDm(
+        with: client.inboxID
+    )
+} catch {
+    print("Cannot create DM with yourself")
+}
+```
+
+### Recipient Must Be Registered
+
+```swift DmTests.swift:123-133
+// Check if identity can receive messages first
+let canMessage = try await client.canMessage(
+    identity: recipientIdentity
+)
+
+if canMessage {
+    let dm = try await client.conversations.findOrCreateDmWithIdentity(
+        with: recipientIdentity
+    )
+} else {
+    print("Recipient is not registered on XMTP")
+}
+```
+
+### Use Inbox IDs, Not Addresses
+
+```swift DmTests.swift:102-121
+// WRONG - Don't use wallet addresses directly
+do {
+    let dm = try await client.conversations.newConversation(
+        with: "0x123..."  // Address, not inbox ID
+    )
+} catch ClientError.invalidInboxId(let id) {
+    print("Invalid inbox ID: \(id)")
+}
+
+// CORRECT - Use inbox ID
+let inboxId = try await client.inboxIdFromIdentity(
+    identity: recipientIdentity
+)
+
+let dm = try await client.conversations.newConversation(
+    with: inboxId!
+)
+```
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Use findOrCreateDm">
+    Always use `findOrCreateDm` to avoid duplicate conversations:
+    
+    ```swift
+    // RECOMMENDED
+    let dm = try await client.conversations.findOrCreateDm(
+        with: recipientInboxId
+    )
+    
+    // NOT RECOMMENDED - may create duplicates
+    let dm = try await client.conversations.newConversation(
+        with: recipientInboxId
+    )
+    ```
+  </Accordion>
+
+  <Accordion title="Check registration status">
+    Verify recipients can receive messages:
+    
+    ```swift
+    let canMessage = try await client.canMessage(
+        identity: recipientIdentity
+    )
+    
+    if canMessage {
+        let dm = try await client.conversations.findOrCreateDmWithIdentity(
+            with: recipientIdentity
+        )
+    } else {
+        showAlert("Recipient is not on XMTP")
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="Sync before reading">
+    Sync the DM before accessing messages:
+    
+    ```swift
+    try await dm.sync()
+    let messages = try await dm.messages()
+    ```
+  </Accordion>
+
+  <Accordion title="Use enrichedMessages for UI">
+    For chat interfaces, use enriched messages:
+    
+    ```swift
+    let messages = try await dm.enrichedMessages(
+        limit: 50,
+        direction: .descending
+    )
+    
+    // Reactions and replies are included
+    for message in messages {
+        displayMessage(message)
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="Handle consent properly">
+    Respect user consent preferences:
+    
+    ```swift
+    let dm = try await client.conversations.findOrCreateDm(
+        with: recipientInboxId
+    )
+    
+    // Check consent before showing in main list
+    let consentState = try dm.consentState()
+    
+    switch consentState {
+    case .allowed:
+        showInMainList(dm)
+    case .denied:
+        showInBlockedList(dm)
+    case .unknown:
+        showInRequestsList(dm)
+    }
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Examples
+
+### Create DM with Validation
+
+```swift
+func createDM(
+    with recipientIdentity: PublicIdentity
+) async throws -> Dm? {
+    // Check if recipient can receive messages
+    let canMessage = try await client.canMessage(
+        identity: recipientIdentity
+    )
+    
+    guard canMessage else {
+        print("Recipient is not registered on XMTP")
+        return nil
+    }
+    
+    // Get or create inbox ID
+    guard let inboxId = try await client.inboxIdFromIdentity(
+        identity: recipientIdentity
+    ) else {
+        print("Could not resolve inbox ID")
+        return nil
+    }
+    
+    // Cannot DM yourself
+    guard inboxId != client.inboxID else {
+        print("Cannot create DM with yourself")
+        return nil
+    }
+    
+    // Create or find DM
+    let dm = try await client.conversations.findOrCreateDm(
+        with: inboxId
+    )
+    
+    return dm
+}
+```
+
+### DM Chat View Model
+
+```swift
+class DMViewModel: ObservableObject {
+    @Published var messages: [DecodedMessageV2] = []
+    @Published var peerName: String = ""
+    
+    let dm: Dm
+    let client: Client
+    private var streamTask: Task<Void, Never>?
+    
+    init(dm: Dm, client: Client) {
+        self.dm = dm
+        self.client = client
+    }
+    
+    func load() async {
+        do {
+            // Sync first
+            try await dm.sync()
+            
+            // Load messages
+            messages = try await dm.enrichedMessages(
+                limit: 50,
+                direction: .descending
+            )
+            
+            // Get peer name
+            let peerInboxId = try dm.peerInboxId
+            peerName = await resolveName(for: peerInboxId)
+            
+            // Start streaming
+            startStreaming()
+            
+        } catch {
+            print("Failed to load DM: \(error)")
+        }
+    }
+    
+    func startStreaming() {
+        streamTask = Task { [weak self] in
+            guard let self = self else { return }
+            
+            let stream = dm.streamMessages()
+            
+            for try await message in stream {
+                guard !Task.isCancelled else { break }
+                
+                await MainActor.run {
+                    let enriched = DecodedMessageV2.create(
+                        ffiMessage: message
+                    )
+                    self.messages.insert(enriched, at: 0)
+                }
+            }
+        }
+    }
+    
+    func sendMessage(_ text: String) async {
+        do {
+            _ = try await dm.send(content: text)
+        } catch {
+            print("Failed to send message: \(error)")
+        }
+    }
+    
+    func loadMore() async {
+        guard let oldest = messages.last else { return }
+        
+        let more = try? await dm.enrichedMessages(
+            beforeNs: oldest.sentAtNs,
+            limit: 50
+        )
+        
+        if let more = more {
+            await MainActor.run {
+                messages.append(contentsOf: more)
+            }
+        }
+    }
+    
+    func resolveName(for inboxId: String) async -> String {
+        // Implement your name resolution logic
+        // e.g., ENS lookup, address book, etc.
+        return inboxId.prefix(8) + "..."
+    }
+    
+    deinit {
+        dm.endStream()
+        streamTask?.cancel()
+    }
+}
+```
+
+### Message Request Handler
+
+```swift
+class MessageRequestHandler {
+    let client: Client
+    
+    init(client: Client) {
+        self.client = client
+    }
+    
+    func getPendingRequests() async throws -> [Dm] {
+        // Get DMs with unknown consent state
+        return try await client.conversations.listDms(
+            consentStates: [.unknown]
+        )
+    }
+    
+    func acceptRequest(dm: Dm) async throws {
+        try await dm.updateConsentState(state: .allowed)
+        print("Accepted message request")
+    }
+    
+    func declineRequest(dm: Dm) async throws {
+        try await dm.updateConsentState(state: .denied)
+        print("Declined message request")
+    }
+    
+    func blockDM(dm: Dm) async throws {
+        try await dm.updateConsentState(state: .denied)
+        print("Blocked DM")
+    }
+    
+    func unblockDM(dm: Dm) async throws {
+        try await dm.updateConsentState(state: .allowed)
+        print("Unblocked DM")
+    }
+}
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Group Chat" icon="users" href="/guides/group-chat">
+    Learn about group messaging features
+  </Card>
+  <Card title="Sending Messages" icon="paper-plane" href="/guides/sending-messages">
+    Send messages in DMs
+  </Card>
+  <Card title="Receiving Messages" icon="inbox" href="/guides/receiving-messages">
+    Handle incoming DM messages
+  </Card>
+  <Card title="Content Types" icon="file-code" href="/guides/content-types">
+    Work with different message types
+  </Card>
+</CardGroup>

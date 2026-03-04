@@ -1,0 +1,132 @@
+---
+title: Introduction
+description: Learn about XMTP and the iOS SDK for building secure messaging applications
+---
+
+XMTP (Extensible Message Transport Protocol) provides a Swift implementation for iOS apps to enable secure, decentralized messaging between blockchain accounts.
+
+## What is XMTP?
+
+XMTP is an open protocol and network for secure, private messaging between blockchain accounts. It enables:
+
+- **Decentralized messaging**: Messages are sent peer-to-peer without relying on centralized servers
+- **Blockchain-native**: Native support for Ethereum accounts (EOA and Smart Contract Wallets)
+- **End-to-end encryption**: All messages are encrypted using the MLS (Message Layer Security) protocol
+- **Cross-platform**: Works across iOS, Android, web, and other platforms
+- **Portable identity**: Your identity and message history can move between apps
+
+## What is the XMTP iOS SDK?
+
+The XMTP iOS SDK (`xmtp-ios`) is a Swift library that provides everything you need to integrate XMTP messaging into your iOS application. The SDK handles:
+
+- Client authentication and identity management
+- End-to-end encryption via MLS protocol
+- Message encoding/decoding with extensible codecs
+- Local database with encryption for message persistence
+- Real-time message streaming
+- Group conversations and direct messages
+- Multi-device synchronization
+
+## Key Features
+
+### MLS Protocol (V3)
+
+The SDK uses the Message Layer Security (MLS) protocol for all conversations, providing:
+
+- Forward secrecy
+- Post-compromise security
+- Efficient group messaging
+- Multi-device support
+
+<Note>
+  XMTP V2 was deprecated on May 1, 2025. All new implementations should use V3 (MLS-based). See the [XMTP V2 deprecation plan](https://community.xmtp.org/t/xip-53-xmtp-v2-deprecation-plan/867) for details.
+</Note>
+
+### Conversation Types
+
+- **Direct Messages (DMs)**: One-on-one conversations between two users
+- **Groups**: Multi-party conversations with customizable permissions
+- **Disappearing Messages**: Configurable message retention policies
+
+### Extensible Content Types
+
+The SDK includes built-in codecs for:
+
+- Text messages
+- Attachments (images, files)
+- Remote attachments (for larger files)
+- Reactions
+- Replies
+- Read receipts
+- Transaction references
+
+You can also create custom content types for your specific use case.
+
+### Device Sync and History
+
+- Automatic synchronization across multiple devices
+- Message history sync when adding new devices
+- Configurable history sync server
+
+## Use Cases
+
+The XMTP iOS SDK is perfect for building:
+
+- **Web3 wallets** with built-in messaging
+- **Social dApps** requiring user communication
+- **NFT marketplaces** with buyer-seller messaging
+- **DAO coordination tools** for member communication
+- **Gaming platforms** with player chat
+- **Customer support** for crypto applications
+
+## Requirements
+
+To use the XMTP iOS SDK, you need:
+
+- **iOS 14.0+** or **macOS 11.0+**
+- **Swift 5.6+**
+- **Xcode 13.0+**
+
+<Note>
+  The SDK requires a database encryption key for local message storage. Make sure to generate and securely store this key.
+</Note>
+
+## Architecture Overview
+
+The SDK consists of several key components:
+
+- **Client**: Entry point for all XMTP operations
+- **Conversations**: Manages DMs and groups
+- **Codec System**: Extensible content encoding/decoding
+- **LibXMTP**: Rust-based core providing cryptographic operations
+- **Local Database**: Encrypted SQLite storage for messages
+
+## Network Environments
+
+XMTP provides three environments:
+
+- **Production** (`grpc.production.xmtp.network`): For production apps
+- **Dev** (`grpc.dev.xmtp.network`): For development and testing
+- **Local**: For local development with Docker
+
+<Warning>
+  Always use the `dev` environment during development. Only switch to `production` when your app is ready for release.
+</Warning>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Installation" icon="download" href="./installation">
+    Install the XMTP iOS SDK in your project
+  </Card>
+  <Card title="Quickstart" icon="rocket" href="./quickstart">
+    Build your first messaging app in minutes
+  </Card>
+</CardGroup>
+
+## Additional Resources
+
+- [iOS SDK API Reference](https://xmtp.github.io/xmtp-ios/)
+- [Example App](https://github.com/xmtp/xmtp-ios/tree/main/example)
+- [XMTP Community Forums](https://community.xmtp.org/)
+- [GitHub Repository](https://github.com/xmtp/xmtp-ios)

@@ -1,0 +1,850 @@
+---
+title: Content Types
+description: Work with different content types including text, attachments, reactions, replies, and read receipts
+---
+
+XMTP uses content type codecs to encode and decode different types of message content. The iOS SDK includes built-in codecs and supports custom implementations.
+
+## Understanding Content Types
+
+Content types define how message data is encoded, decoded, and displayed. Each codec implements the `ContentCodec` protocol:
+
+```swift ContentCodec.swift:80-88
+public protocol ContentCodec {
+    associatedtype T
+    
+    var contentType: ContentTypeID { get }
+    func encode(content: T) throws -> EncodedContent
+    func decode(content: EncodedContent) throws -> T
+    func fallback(content: T) throws -> String?
+    func shouldPush(content: T) throws -> Bool
+}
+```
+
+## Built-in Content Types
+
+### Text Messages
+
+The default content type for plain text:
+
+```swift TextCodec.swift:10-52
+public let ContentTypeText = ContentTypeID(
+    authorityID: "xmtp.org",
+    typeID: "text",
+    versionMajor: 1,
+    versionMinor: 0
+)
+
+// Text codec is registered by default
+let messageId = try await conversation.send(content: "Hello!")
+
+// Decode text message
+let message = messages.first!
+let text: String = try message.content()
+```
+
+**Properties:**
+- Encoding: UTF-8
+- Push notifications: Enabled
+- Fallback: None (native content)
+
+### Attachments
+
+Send files, images, audio, and other media:
+
+<Steps>
+
+<Step title="Register the codec">
+
+```swift AttachmentCodec.swift:9-14
+Client.register(codec: AttachmentCodec())
+```
+
+</Step>
+
+<Step title="Create an attachment">
+
+```swift AttachmentCodec.swift:20-30
+let attachment = Attachment(
+    filename: "photo.jpg",
+    mimeType: "image/jpeg",
+    data: imageData
+)
+```
+
+</Step>
+
+<Step title="Send the attachment">
+
+```swift AttachmentCodec.swift:39-50
+let messageId = try await conversation.send(
+    content: attachment,
+    options: SendOptions(contentType: ContentTypeAttachment)
+)
+```
+
+</Step>
+
+<Step title="Receive and decode">
+
+```swift AttachmentCodec.swift:52-60
+if message.contentTypeId == ContentTypeAttachment {
+    let attachment: Attachment = try message.content()
+    
+    print("Filename: \(attachment.filename)")
+    print("MIME type: \(attachment.mimeType)")
+    print("Size: \(attachment.data.count) bytes")
+    
+    // Save or display the file
+    try attachment.data.write(to: destinationURL)
+}
+```
+
+</Step>
+
+</Steps>
+
+**Properties:**
+- Fallback: "Can't display "{filename}". This app doesn't support attachments."
+- Push notifications: Enabled
+- Use for: Files up to 1MB
+
+### Remote Attachments
+
+For large files stored on external servers:
+
+<Steps>
+
+<Step title="Register the codec">
+
+```swift RemoteAttachmentCodec.swift:5-10
+Client.register(codec: RemoteAttachmentCodec())
+```
+
+</Step>
+
+<Step title="Encrypt the attachment">
+
+```swift RemoteAttachmentCodec.swift:106-121
+let attachment = Attachment(
+    filename: "video.mp4",
+    mimeType: "video/mp4",
+    data: videoData
+)
+
+let encrypted = try RemoteAttachment.encodeEncrypted(
+    content: attachment,
+    codec: AttachmentCodec()
+)
+
+print("Encrypted size: \(encrypted.payload.count) bytes")
+print("Digest: \(encrypted.digest)")
+```
+
+</Step>
+
+<Step title="Upload to storage">
+
+```swift
+// Upload encrypted.payload to your storage service
+let uploadURL = try await uploadToS3(
+    data: encrypted.payload,
+    contentType: "application/octet-stream"
+)
+
+print("Uploaded to: \(uploadURL)")
+```
+
+</Step>
+
+<Step title="Send the reference">
+
+```swift RemoteAttachmentCodec.swift:48-98
+let remoteAttachment = try RemoteAttachment(
+    url: uploadURL,
+    encryptedEncodedContent: encrypted
+)
+
+let messageId = try await conversation.send(
+    content: remoteAttachment,
+    options: SendOptions(contentType: ContentTypeRemoteAttachment)
+)
+```
+
+</Step>
+
+<Step title="Download and decrypt">
+
+```swift RemoteAttachmentCodec.swift:158-172
+if message.contentTypeId == ContentTypeRemoteAttachment {
+    let remote: RemoteAttachment = try message.content()
+    
+    // Download and decrypt
+    let encodedContent = try await remote.content()
+    
+    // Decode the attachment
+    let codec = AttachmentCodec()
+    let attachment = try codec.decode(content: encodedContent)
+    
+    print("Downloaded: \(attachment.filename)")
+}
+```
+
+</Step>
+
+</Steps>
+
+**Properties:**
+- Encryption: AES-256-GCM with HKDF-SHA256
+- Content verification: SHA-256 digest
+- Scheme: HTTPS only
+- Push notifications: Enabled
+- Use for: Files over 1MB
+
+### Reactions
+
+Add emoji reactions to messages:
+
+```swift ReactionCodec.swift:10-118
+// Register codec
+Client.register(codec: ReactionCodec())
+
+// Add reaction
+let reaction = Reaction(
+    reference: originalMessageId,
+    action: .added,
+    content: "👍",
+    schema: .unicode,
+    referenceInboxId: senderInboxId
+)
+
+let messageId = try await conversation.send(
+    content: reaction,
+    options: SendOptions(contentType: ContentTypeReaction)
+)
+
+// Remove reaction
+let removeReaction = Reaction(
+    reference: originalMessageId,
+    action: .removed,
+    content: "👍",
+    schema: .unicode,
+    referenceInboxId: senderInboxId
+)
+
+try await conversation.send(
+    content: removeReaction,
+    options: SendOptions(contentType: ContentTypeReaction)
+)
+```
+
+**Reaction Actions:**
+```swift ReactionCodec.swift:39-52
+public enum ReactionAction: String, Codable {
+    case added    // Add a reaction
+    case removed  // Remove a reaction
+    case unknown  // Unknown action
+}
+```
+
+**Reaction Schemas:**
+```swift ReactionCodec.swift:54-69
+public enum ReactionSchema: String, Codable {
+    case unicode    // Standard emoji: "👍"
+    case shortcode  // Shortcode: ":+1:"
+    case custom     // Custom reactions
+    case unknown    // Unknown schema
+}
+```
+
+**Properties:**
+- Fallback: "Reacted "{content}" to an earlier message" or "Removed "{content}" from an earlier message"
+- Push notifications: Disabled
+- Use for: User reactions to messages
+
+### Replies
+
+Reply to specific messages:
+
+```swift ReplyCodec.swift:10-82
+// Register codec
+Client.register(codec: ReplyCodec())
+
+// Create reply
+let reply = Reply(
+    reference: originalMessageId,
+    content: "Thanks for the update!",
+    contentType: ContentTypeText
+)
+
+let messageId = try await conversation.send(
+    content: reply,
+    options: SendOptions(contentType: ContentTypeReply)
+)
+
+// Decode reply
+if message.contentTypeId == ContentTypeReply {
+    let reply: Reply = try message.content()
+    
+    print("Replying to: \(reply.reference)")
+    
+    if reply.contentType == ContentTypeText {
+        let text = reply.content as! String
+        print("Reply text: \(text)")
+    }
+}
+```
+
+**Reply with Different Content Types:**
+```swift
+// Reply with an attachment
+let attachment = Attachment(
+    filename: "response.pdf",
+    mimeType: "application/pdf",
+    data: pdfData
+)
+
+let reply = Reply(
+    reference: originalMessageId,
+    content: attachment,
+    contentType: ContentTypeAttachment
+)
+
+try await conversation.send(
+    content: reply,
+    options: SendOptions(contentType: ContentTypeReply)
+)
+```
+
+**Properties:**
+- Fallback: "Replied with "{content}" to an earlier message"
+- Push notifications: Enabled
+- Use for: Threaded conversations
+
+### Read Receipts
+
+Notify senders that messages have been read:
+
+```swift ReadReceiptCodec.swift:10-48
+// Register codec
+Client.register(codec: ReadReceiptCodec())
+
+// Send read receipt
+let receipt = ReadReceipt()
+
+let messageId = try await conversation.send(
+    content: receipt,
+    options: SendOptions(contentType: ContentTypeReadReceipt)
+)
+
+// Check for read receipts
+let readTimes = try conversation.getLastReadTimes()
+
+for (inboxId, timestamp) in readTimes {
+    print("\(inboxId) read at: \(timestamp)")
+}
+```
+
+**Properties:**
+- Fallback: None
+- Push notifications: Disabled
+- Use for: Message read status
+
+## Registering Codecs
+
+### Global Registration
+
+Register codecs once for all clients:
+
+```swift Client.swift:200-202
+// Register at app startup
+Client.register(codec: TextCodec())
+Client.register(codec: AttachmentCodec())
+Client.register(codec: ReactionCodec())
+Client.register(codec: ReplyCodec())
+Client.register(codec: ReadReceiptCodec())
+Client.register(codec: RemoteAttachmentCodec())
+```
+
+### Per-Client Registration
+
+Register during client creation:
+
+```swift Client.swift:103-104
+let options = ClientOptions(
+    api: .init(env: .production),
+    codecs: [
+        TextCodec(),
+        AttachmentCodec(),
+        ReactionCodec(),
+        ReplyCodec(),
+        ReadReceiptCodec(),
+        RemoteAttachmentCodec()
+    ],
+    dbEncryptionKey: encryptionKey
+)
+
+let client = try await Client.create(
+    account: signingKey,
+    options: options
+)
+```
+
+## Creating Custom Content Types
+
+### Define Your Content Type
+
+```swift ContentCodec.swift:80-88
+// Define the content type ID
+public let ContentTypeCustom = ContentTypeID(
+    authorityID: "your-app.example",
+    typeID: "custom-type",
+    versionMajor: 1,
+    versionMinor: 0
+)
+
+// Define your data structure
+public struct CustomContent: Codable {
+    public var title: String
+    public var metadata: [String: String]
+    public var timestamp: Int64
+    
+    public init(title: String, metadata: [String: String]) {
+        self.title = title
+        self.metadata = metadata
+        self.timestamp = Date().millisecondsSinceEpoch
+    }
+}
+```
+
+### Implement the Codec
+
+```swift ContentCodec.swift:80-88
+public struct CustomCodec: ContentCodec {
+    public typealias T = CustomContent
+    
+    public var contentType = ContentTypeCustom
+    
+    public init() {}
+    
+    public func encode(content: CustomContent) throws -> EncodedContent {
+        var encodedContent = EncodedContent()
+        
+        encodedContent.type = ContentTypeCustom
+        encodedContent.content = try JSONEncoder().encode(content)
+        
+        return encodedContent
+    }
+    
+    public func decode(content: EncodedContent) throws -> CustomContent {
+        return try JSONDecoder().decode(
+            CustomContent.self,
+            from: content.content
+        )
+    }
+    
+    public func fallback(content: CustomContent) throws -> String? {
+        "Custom content: \(content.title)"
+    }
+    
+    public func shouldPush(content: CustomContent) throws -> Bool {
+        true
+    }
+}
+```
+
+### Register and Use
+
+```swift
+// Register the codec
+Client.register(codec: CustomCodec())
+
+// Send custom content
+let custom = CustomContent(
+    title: "Important Update",
+    metadata: ["priority": "high"]
+)
+
+let messageId = try await conversation.send(
+    content: custom,
+    options: SendOptions(contentType: ContentTypeCustom)
+)
+
+// Receive custom content
+if message.contentTypeId == ContentTypeCustom {
+    let custom: CustomContent = try message.content()
+    print("Title: \(custom.title)")
+}
+```
+
+## Working with Content Types
+
+### Check Content Type
+
+```swift
+func handleMessage(_ message: DecodedMessage) {
+    switch message.contentTypeId {
+    case ContentTypeText:
+        handleText(message)
+    case ContentTypeAttachment:
+        handleAttachment(message)
+    case ContentTypeReaction:
+        handleReaction(message)
+    case ContentTypeReply:
+        handleReply(message)
+    case ContentTypeReadReceipt:
+        handleReadReceipt(message)
+    default:
+        handleUnsupported(message)
+    }
+}
+```
+
+### Use Fallback Content
+
+```swift
+func displayMessage(_ message: DecodedMessage) {
+    do {
+        // Try to decode with the proper codec
+        let text: String = try message.content()
+        displayText(text)
+    } catch {
+        // Use fallback for unsupported types
+        if let fallback = message.fallback {
+            displayFallback(fallback)
+        } else {
+            displayError("Unsupported message type")
+        }
+    }
+}
+```
+
+### Decode Generic Content
+
+```swift ContentCodec.swift:17-31
+let encodedContent = message.encodedContent
+
+// Decode using type inference
+let text: String = try encodedContent.decoded()
+print(text)
+
+// Or decode a specific type
+let attachment: Attachment = try encodedContent.decoded()
+print(attachment.filename)
+```
+
+## Content Compression
+
+### Enable Compression
+
+```swift ContentCodec.swift:33-50
+let options = SendOptions(
+    compression: .gzip,  // or .deflate
+    contentType: ContentTypeText
+)
+
+let messageId = try await conversation.send(
+    content: longMessage,
+    options: options
+)
+```
+
+### Compression Options
+
+```swift
+public enum EncodedContentCompression {
+    case deflate  // DEFLATE compression
+    case gzip     // GZIP compression
+}
+```
+
+### Automatic Decompression
+
+Messages are automatically decompressed when decoded:
+
+```swift ContentCodec.swift:52-78
+// Compressed messages are automatically decompressed
+let text: String = try message.content()
+// Works transparently, no special handling needed
+```
+
+## Content Type Registry
+
+### Check Registration Status
+
+```swift CodecRegistry.swift:52-62
+let registry = Client.codecRegistry
+
+if registry.isRegistered(codec: AttachmentCodec()) {
+    print("AttachmentCodec is registered")
+}
+
+if registry.isRegistered(codecId: ContentTypeAttachment.id) {
+    print("Attachment content type is available")
+}
+```
+
+### Find Codecs
+
+```swift CodecRegistry.swift:22-35
+let registry = Client.codecRegistry
+
+// Find by content type
+let codec = registry.find(for: ContentTypeText)
+
+// Find by type string
+let codecByString = registry.find(for: "xmtp.org/text:1.0")
+```
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Register codecs early">
+    Register all codecs at app startup before creating clients:
+    
+    ```swift
+    @main
+    struct MyApp: App {
+        init() {
+            // Register codecs
+            Client.register(codec: TextCodec())
+            Client.register(codec: AttachmentCodec())
+            Client.register(codec: ReactionCodec())
+            Client.register(codec: ReplyCodec())
+            Client.register(codec: ReadReceiptCodec())
+            Client.register(codec: RemoteAttachmentCodec())
+        }
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="Always provide fallback text">
+    Implement meaningful fallback messages for custom codecs:
+    
+    ```swift
+    public func fallback(content: CustomContent) throws -> String? {
+        // Provide context about what the message contains
+        "\(content.type): \(content.summary)"
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="Use remote attachments for large files">
+    Switch to RemoteAttachment for files over 1MB:
+    
+    ```swift
+    let maxDirectSize = 1_000_000 // 1MB
+    
+    if fileData.count > maxDirectSize {
+        // Use remote attachment
+        let encrypted = try RemoteAttachment.encodeEncrypted(
+            content: attachment,
+            codec: AttachmentCodec()
+        )
+        let url = try await uploadToStorage(encrypted.payload)
+        let remote = try RemoteAttachment(url: url, encryptedEncodedContent: encrypted)
+        try await conversation.send(content: remote)
+    } else {
+        // Use direct attachment
+        try await conversation.send(content: attachment)
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="Handle decoding errors gracefully">
+    Always handle codec errors and provide fallback UI:
+    
+    ```swift
+    do {
+        let content = try message.content() as YourType
+        displayContent(content)
+    } catch CodecError.invalidContent {
+        if let fallback = message.fallback {
+            displayFallback(fallback)
+        }
+    } catch CodecError.codecNotFound {
+        displayUnsupported(message.contentTypeId)
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="Version your content types">
+    Use semantic versioning for custom content types:
+    
+    ```swift
+    // Version 1.0
+    let ContentTypeCustomV1 = ContentTypeID(
+        authorityID: "your-app.example",
+        typeID: "custom",
+        versionMajor: 1,
+        versionMinor: 0
+    )
+    
+    // Version 2.0 with breaking changes
+    let ContentTypeCustomV2 = ContentTypeID(
+        authorityID: "your-app.example",
+        typeID: "custom",
+        versionMajor: 2,
+        versionMinor: 0
+    )
+    ```
+  </Accordion>
+
+  <Accordion title="Disable push for non-critical content">
+    Return false from shouldPush for reactions, read receipts, and typing indicators:
+    
+    ```swift
+    public func shouldPush(content: ReadReceipt) throws -> Bool {
+        false  // Don't push notifications for read receipts
+    }
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Examples
+
+### Multi-Type Message Handler
+
+```swift
+class MessageHandler {
+    func handle(_ message: DecodedMessage) async {
+        switch message.contentTypeId {
+        case ContentTypeText:
+            handleText(message)
+            
+        case ContentTypeAttachment:
+            await handleAttachment(message)
+            
+        case ContentTypeRemoteAttachment:
+            await handleRemoteAttachment(message)
+            
+        case ContentTypeReaction:
+            handleReaction(message)
+            
+        case ContentTypeReply:
+            handleReply(message)
+            
+        case ContentTypeReadReceipt:
+            handleReadReceipt(message)
+            
+        default:
+            handleUnsupported(message)
+        }
+    }
+    
+    func handleText(_ message: DecodedMessage) {
+        let text: String = try! message.content()
+        displayTextMessage(text: text, sender: message.senderInboxId)
+    }
+    
+    func handleAttachment(_ message: DecodedMessage) async {
+        let attachment: Attachment = try! message.content()
+        
+        if attachment.mimeType.starts(with: "image/") {
+            if let image = UIImage(data: attachment.data) {
+                displayImage(image, filename: attachment.filename)
+            }
+        } else {
+            displayFileAttachment(attachment)
+        }
+    }
+    
+    func handleRemoteAttachment(_ message: DecodedMessage) async {
+        let remote: RemoteAttachment = try! message.content()
+        
+        showDownloadButton(url: remote.url) {
+            let encodedContent = try await remote.content()
+            let attachment = try AttachmentCodec().decode(content: encodedContent)
+            await self.handleAttachment(attachment)
+        }
+    }
+    
+    func handleReaction(_ message: DecodedMessage) {
+        let reaction: Reaction = try! message.content()
+        updateReactions(messageId: reaction.reference, emoji: reaction.content)
+    }
+    
+    func handleReply(_ message: DecodedMessage) {
+        let reply: Reply = try! message.content()
+        displayReply(reply, to: reply.reference)
+    }
+    
+    func handleReadReceipt(_ message: DecodedMessage) {
+        updateReadStatus(for: message.senderInboxId)
+    }
+    
+    func handleUnsupported(_ message: DecodedMessage) {
+        if let fallback = message.fallback {
+            displayFallback(fallback)
+        } else {
+            displayError("Unsupported content type: \(message.contentTypeId)")
+        }
+    }
+}
+```
+
+### Smart Attachment Sender
+
+```swift
+func sendAttachment(
+    conversation: Conversation,
+    fileURL: URL,
+    uploadService: FileUploadService
+) async throws -> String {
+    let data = try Data(contentsOf: fileURL)
+    let filename = fileURL.lastPathComponent
+    let mimeType = getMimeType(for: fileURL)
+    
+    let attachment = Attachment(
+        filename: filename,
+        mimeType: mimeType,
+        data: data
+    )
+    
+    // Use direct attachment for small files
+    if data.count <= 1_000_000 {
+        return try await conversation.send(
+            content: attachment,
+            options: SendOptions(contentType: ContentTypeAttachment)
+        )
+    }
+    
+    // Use remote attachment for large files
+    let encrypted = try RemoteAttachment.encodeEncrypted(
+        content: attachment,
+        codec: AttachmentCodec()
+    )
+    
+    let uploadURL = try await uploadService.upload(
+        data: encrypted.payload,
+        filename: filename
+    )
+    
+    let remote = try RemoteAttachment(
+        url: uploadURL,
+        encryptedEncodedContent: encrypted
+    )
+    
+    return try await conversation.send(
+        content: remote,
+        options: SendOptions(contentType: ContentTypeRemoteAttachment)
+    )
+}
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Sending Messages" icon="paper-plane" href="/guides/sending-messages">
+    Learn how to send messages with different content types
+  </Card>
+  <Card title="Receiving Messages" icon="inbox" href="/guides/receiving-messages">
+    Handle and decode incoming messages
+  </Card>
+  <Card title="Group Chat" icon="users" href="/guides/group-chat">
+    Explore group messaging features
+  </Card>
+  <Card title="Direct Messages" icon="message" href="/guides/direct-messages">
+    Learn about direct messaging
+  </Card>
+</CardGroup>

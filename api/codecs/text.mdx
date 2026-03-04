@@ -1,0 +1,162 @@
+---
+title: 'TextCodec'
+description: 'Standard codec for encoding and decoding plain text messages'
+icon: 'text'
+---
+
+## Overview
+
+The `TextCodec` is the default content type codec for encoding and decoding plain text messages in XMTP. It handles UTF-8 encoded strings and is automatically registered when you create an XMTP client.
+
+## Content Type ID
+
+```swift
+ContentTypeText = ContentTypeID(
+    authorityID: "xmtp.org",
+    typeID: "text",
+    versionMajor: 1,
+    versionMinor: 0
+)
+```
+
+## Structure
+
+### TextCodec
+
+```swift
+public struct TextCodec: ContentCodec {
+    public typealias T = String
+    public var contentType = ContentTypeText
+    
+    public func encode(content: String) throws -> EncodedContent
+    public func decode(content: EncodedContent) throws -> String
+    public func fallback(content: String) throws -> String?
+    public func shouldPush(content: String) throws -> Bool
+}
+```
+
+## Usage
+
+### Sending Text Messages
+
+Text messages are the default content type, so you can send them directly:
+
+```swift
+import XMTPiOS
+
+let conversation = try await client.conversations.newConversation(
+    with: peerAddress
+)
+
+// Simple text send (uses TextCodec automatically)
+try await conversation.send(text: "Hello, world!")
+
+// Explicit content type
+try await conversation.send(
+    content: "Hello, world!",
+    options: .init(contentType: ContentTypeText)
+)
+```
+
+### Receiving Text Messages
+
+Text messages are automatically decoded:
+
+```swift
+let messages = try await conversation.messages()
+
+for message in messages {
+    let text: String = try message.content()
+    print("Received: \(text)")
+}
+```
+
+## Implementation Details
+
+### Encoding
+
+The `TextCodec` encodes strings as UTF-8 data:
+
+```swift
+public func encode(content: String) throws -> EncodedContent {
+    var encodedContent = EncodedContent()
+    encodedContent.type = ContentTypeText
+    encodedContent.parameters = ["encoding": "UTF-8"]
+    encodedContent.content = Data(content.utf8)
+    return encodedContent
+}
+```
+
+### Decoding
+
+The codec verifies UTF-8 encoding and decodes the data:
+
+```swift
+public func decode(content: EncodedContent) throws -> String {
+    if let encoding = content.parameters["encoding"], encoding != "UTF-8" {
+        throw TextCodecError.invalidEncoding
+    }
+    
+    if let contentString = String(data: content.content, encoding: .utf8) {
+        return contentString
+    } else {
+        throw TextCodecError.unknownDecodingError
+    }
+}
+```
+
+### Fallback
+
+Text content has no fallback representation (returns `nil`):
+
+```swift
+public func fallback(content: String) throws -> String? {
+    nil
+}
+```
+
+### Push Notifications
+
+Text messages trigger push notifications by default:
+
+```swift
+public func shouldPush(content: String) throws -> Bool {
+    true
+}
+```
+
+## Error Handling
+
+The `TextCodec` can throw the following errors:
+
+```swift
+enum TextCodecError: Error {
+    case invalidEncoding    // Non-UTF-8 encoding detected
+    case unknownDecodingError  // Failed to decode as UTF-8 string
+}
+```
+
+### Example Error Handling
+
+```swift
+do {
+    let text: String = try message.content()
+    print("Message: \(text)")
+} catch TextCodecError.invalidEncoding {
+    print("Message uses unsupported encoding")
+} catch TextCodecError.unknownDecodingError {
+    print("Failed to decode message content")
+} catch {
+    print("Unexpected error: \(error)")
+}
+```
+
+## Related
+
+- [ContentCodec Protocol](/api/content-codec) - Base protocol for all codecs
+- [Custom Codecs](/advanced/custom-codecs) - Creating custom content types
+- [Sending Messages](/guides/sending-messages) - Message sending guide
+
+## Source
+
+- [TextCodec.swift](https://github.com/xmtp/xmtp-ios/blob/main/Sources/XMTPiOS/Codecs/TextCodec.swift)

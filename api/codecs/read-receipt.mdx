@@ -1,0 +1,423 @@
+---
+title: 'ReadReceiptCodec'
+description: 'Codec for sending read receipt notifications'
+icon: 'envelope-open-text'
+---
+
+## Overview
+
+The `ReadReceiptCodec` enables sending read receipt notifications to indicate that a message has been read. Read receipts contain no additional data—they serve purely as a signal.
+
+<Info>
+Read receipts are lightweight notifications that don't trigger push notifications, making them ideal for presence indicators.
+</Info>
+
+## Content Type ID
+
+```swift
+ContentTypeReadReceipt = ContentTypeID(
+    authorityID: "xmtp.org",
+    typeID: "readReceipt",
+    versionMajor: 1,
+    versionMinor: 0
+)
+```
+
+## Structure
+
+### ReadReceipt
+
+```swift
+public struct ReadReceipt {
+    public init()
+}
+```
+
+The `ReadReceipt` structure is intentionally empty. The message timestamp and sender information are sufficient to indicate when and by whom a message was read.
+
+### ReadReceiptCodec
+
+```swift
+public struct ReadReceiptCodec: ContentCodec {
+    public typealias T = ReadReceipt
+    public var contentType = ContentTypeReadReceipt
+    
+    public func encode(content: ReadReceipt) throws -> EncodedContent
+    public func decode(content: EncodedContent) throws -> ReadReceipt
+    public func fallback(content: ReadReceipt) throws -> String?
+    public func shouldPush(content: ReadReceipt) throws -> Bool
+}
+```
+
+## Usage
+
+### Registering the Codec
+
+```swift
+import XMTPiOS
+
+Client.register(codec: ReadReceiptCodec())
+```
+
+### Sending Read Receipts
+
+Send a read receipt when a user views a message:
+
+```swift
+func markAsRead(_ message: DecodedMessage) async throws {
+    let readReceipt = ReadReceipt()
+    
+    try await conversation.send(
+        content: readReceipt,
+        options: .init(contentType: ContentTypeReadReceipt)
+    )
+}
+```
+
+### Automatic Read Receipts
+
+Send read receipts automatically when messages are displayed:
+
+```swift
+func displayMessages() async throws {
+    let messages = try await conversation.messages()
+    
+    for message in messages {
+        // Display the message
+        displayInUI(message)
+        
+        // Send read receipt
+        if message.senderAddress != client.address {
+            try await markAsRead(message)
+        }
+    }
+}
+```
+
+### Receiving Read Receipts
+
+Detect when messages have been read:
+
+```swift
+func checkReadReceipts() async throws {
+    let messages = try await conversation.messages()
+    
+    for message in messages {
+        if message.contentTypeId == ContentTypeReadReceipt.id {
+            print("Message read by \(message.senderAddress) at \(message.sentAt)")
+        }
+    }
+}
+```
+
+### Tracking Read Status
+
+Track which messages have been read:
+
+```swift
+struct MessageWithReadStatus {
+    let message: DecodedMessage
+    var readBy: [String] = []  // Addresses that read the message
+    var readAt: [Date] = []    // When they read it
+}
+
+func getMessagesWithReadStatus() async throws -> [MessageWithReadStatus] {
+    let messages = try await conversation.messages()
+    var messageStatuses: [String: MessageWithReadStatus] = [:]
+    var lastMessageTime: Date?
+    
+    for message in messages.reversed() {
+        if message.contentTypeId == ContentTypeReadReceipt.id {
+            // This is a read receipt
+            if let lastTime = lastMessageTime {
+                // Find messages sent before this receipt
+                for (id, var status) in messageStatuses {
+                    if status.message.sentAt <= lastTime {
+                        status.readBy.append(message.senderAddress)
+                        status.readAt.append(message.sentAt)
+                        messageStatuses[id] = status
+                    }
+                }
+            }
+        } else {
+            // Regular message
+            messageStatuses[message.id] = MessageWithReadStatus(message: message)
+            lastMessageTime = message.sentAt
+        }
+    }
+    
+    return Array(messageStatuses.values)
+}
+```
+
+## Implementation Details
+
+### Encoding
+
+The encoder creates an empty encoded content:
+
+```swift
+public func encode(content: ReadReceipt) throws -> EncodedContent {
+    var encodedContent = EncodedContent()
+    encodedContent.type = ContentTypeReadReceipt
+    encodedContent.content = Data()
+    return encodedContent
+}
+```
+
+### Decoding
+
+The decoder simply returns a new `ReadReceipt` instance:
+
+```swift
+public func decode(content: EncodedContent) throws -> ReadReceipt {
+    ReadReceipt()
+}
+```
+
+### Fallback
+
+Read receipts have no fallback representation:
+
+```swift
+public func fallback(content: ReadReceipt) throws -> String? {
+    nil
+}
+```
+
+### Push Notifications
+
+Read receipts **do not** trigger push notifications:
+
+```swift
+public func shouldPush(content: ReadReceipt) throws -> Bool {
+    false
+}
+```
+
+<Info>
+Since `shouldPush` returns `false`, read receipts won't wake up the recipient's device, making them non-intrusive.
+</Info>
+
+## Common Patterns
+
+### Read Receipt Manager
+
+```swift
+class ReadReceiptManager {
+    let conversation: Conversation
+    private var sentReceipts: Set<String> = []
+    
+    func sendReadReceiptIfNeeded(for message: DecodedMessage) async throws {
+        // Don't send receipt for our own messages
+        guard message.senderAddress != client.address else { return }
+        
+        // Don't send duplicate receipts
+        guard !sentReceipts.contains(message.id) else { return }
+        
+        // Send receipt
+        let receipt = ReadReceipt()
+        try await conversation.send(
+            content: receipt,
+            options: .init(contentType: ContentTypeReadReceipt)
+        )
+        
+        sentReceipts.insert(message.id)
+    }
+    
+    func getReadStatus() async throws -> [String: [String]] {
+        var readByAddress: [String: [String]] = [:]
+        let messages = try await conversation.messages()
+        var currentMessageId: String?
+        
+        for message in messages.reversed() {
+            if message.contentTypeId != ContentTypeReadReceipt.id {
+                currentMessageId = message.id
+            } else if let id = currentMessageId {
+                readByAddress[id, default: []].append(message.senderAddress)
+            }
+        }
+        
+        return readByAddress
+    }
+}
+```
+
+### UI Integration
+
+```swift
+class MessageViewController: UIViewController {
+    var readReceiptManager: ReadReceiptManager!
+    
+    func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        
+        // Send read receipts for visible messages
+        Task {
+            for message in visibleMessages {
+                try? await readReceiptManager.sendReadReceiptIfNeeded(for: message)
+            }
+        }
+    }
+    
+    func displayReadIndicator(for messageId: String) async {
+        let readStatus = try? await readReceiptManager.getReadStatus()
+        
+        if let readers = readStatus?[messageId], !readers.isEmpty {
+            // Show "Read" indicator
+            readIndicatorLabel.text = "Read by \(readers.count)"
+            readIndicatorLabel.isHidden = false
+        }
+    }
+}
+```
+
+### Privacy-Aware Read Receipts
+
+```swift
+class PrivacyAwareReadReceipts {
+    var sendReadReceipts = true  // User preference
+    
+    func handleMessageViewed(_ message: DecodedMessage) async throws {
+        guard sendReadReceipts else { return }
+        
+        let receipt = ReadReceipt()
+        try await conversation.send(
+            content: receipt,
+            options: .init(contentType: ContentTypeReadReceipt)
+        )
+    }
+}
+```
+
+## Complete Example
+
+```swift
+import XMTPiOS
+
+class ConversationWithReadReceipts {
+    let client: Client
+    let conversation: Conversation
+    private var lastReadReceiptTime: Date?
+    
+    init(client: Client, conversation: Conversation) {
+        self.client = client
+        self.conversation = conversation
+        
+        // Register codec
+        Client.register(codec: ReadReceiptCodec())
+    }
+    
+    func markConversationAsRead() async throws {
+        let now = Date()
+        
+        // Avoid sending duplicate receipts too quickly
+        if let lastTime = lastReadReceiptTime,
+           now.timeIntervalSince(lastTime) < 5 {
+            return
+        }
+        
+        let receipt = ReadReceipt()
+        try await conversation.send(
+            content: receipt,
+            options: .init(contentType: ContentTypeReadReceipt)
+        )
+        
+        lastReadReceiptTime = now
+    }
+    
+    func getUnreadCount() async throws -> Int {
+        let messages = try await conversation.messages()
+        var lastReceiptTime: Date?
+        
+        // Find the most recent read receipt from the other party
+        for message in messages {
+            if message.contentTypeId == ContentTypeReadReceipt.id,
+               message.senderAddress != client.address {
+                lastReceiptTime = message.sentAt
+                break
+            }
+        }
+        
+        // Count messages sent after last receipt
+        guard let receiptTime = lastReceiptTime else {
+            return messages.filter { $0.senderAddress != client.address }.count
+        }
+        
+        return messages.filter {
+            $0.senderAddress != client.address &&
+            $0.sentAt > receiptTime &&
+            $0.contentTypeId != ContentTypeReadReceipt.id
+        }.count
+    }
+    
+    func displayMessagesWithReadStatus() async throws {
+        let messages = try await conversation.messages()
+        var readReceipts: [Date] = []
+        
+        // Collect read receipt timestamps
+        for message in messages {
+            if message.contentTypeId == ContentTypeReadReceipt.id,
+               message.senderAddress != client.address {
+                readReceipts.append(message.sentAt)
+            }
+        }
+        
+        // Display messages with read indicators
+        for message in messages {
+            if message.senderAddress == client.address {
+                let isRead = readReceipts.contains { $0 > message.sentAt }
+                print("\(message.id): \(isRead ? "✓✓" : "✓")")
+            }
+        }
+    }
+}
+```
+
+## Best Practices
+
+<Tip>
+**Respect Privacy**: Make read receipts optional in your app settings. Some users prefer not to send them.
+</Tip>
+
+<Tip>
+**Batch Receipts**: Avoid sending a read receipt for every single message. Send one receipt to mark all visible messages as read.
+</Tip>
+
+<Tip>
+**Debounce**: Wait a few seconds before sending a receipt to avoid rapid-fire sends as the user scrolls.
+</Tip>
+
+<Warning>
+**Don't Block UI**: Send read receipts asynchronously without blocking the UI thread.
+</Warning>
+
+## Privacy Considerations
+
+Read receipts reveal information about user behavior:
+
+- **When** messages are read
+- **If** messages are being ignored
+- User's **activity patterns**
+
+Consider providing user controls:
+
+```swift
+class ReadReceiptSettings {
+    @AppStorage("sendReadReceipts") var enabled = true
+    
+    func shouldSendReceipt() -> Bool {
+        enabled
+    }
+}
+```
+
+## Related
+
+- [ReactionCodec](/api/codecs/reaction) - For message reactions
+- [ContentCodec Protocol](/api/content-codec) - Base protocol for all codecs
+- [Push Notifications](/advanced/push-notifications) - Notification handling
+
+## Source
+
+- [ReadReceiptCodec.swift](https://github.com/xmtp/xmtp-ios/blob/main/Sources/XMTPiOS/Codecs/ReadReceiptCodec.swift)

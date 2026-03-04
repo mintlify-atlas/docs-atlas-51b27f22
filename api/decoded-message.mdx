@@ -1,0 +1,427 @@
+---
+title: DecodedMessage API
+description: Structure and properties of decoded messages
+---
+
+The `DecodedMessage` type represents a decoded message retrieved from a conversation. It provides access to message content, metadata, and sender information.
+
+## Overview
+
+There are two message types available:
+
+- **DecodedMessage** - Basic message structure returned by `messages()` and `streamMessages()`
+- **DecodedMessageV2** - Enhanced message structure returned by `enrichedMessages()` with reactions and metadata included
+
+## DecodedMessage
+
+Basic message structure with decoded content.
+
+```swift
+public struct DecodedMessage: Identifiable
+```
+
+### Properties
+
+<ResponseField name="id" type="String">
+  Unique hex-encoded message identifier
+</ResponseField>
+
+<ResponseField name="conversationId" type="String">
+  Hex-encoded ID of the conversation this message belongs to
+</ResponseField>
+
+<ResponseField name="senderInboxId" type="InboxId">
+  Inbox ID of the message sender
+</ResponseField>
+
+<ResponseField name="kind" type="FfiConversationMessageKind">
+  The kind of message (e.g., application message, membership change)
+</ResponseField>
+
+<ResponseField name="sentAt" type="Date">
+  Timestamp when the message was sent
+</ResponseField>
+
+<ResponseField name="sentAtNs" type="Int64">
+  Timestamp when the message was sent (in nanoseconds)
+</ResponseField>
+
+<ResponseField name="insertedAt" type="Date">
+  Timestamp when the message was inserted into the local database
+</ResponseField>
+
+<ResponseField name="insertedAtNs" type="Int64">
+  Timestamp when the message was inserted (in nanoseconds)
+</ResponseField>
+
+<ResponseField name="expiresAt" type="Date?">
+  Timestamp when the message expires (for disappearing messages)
+</ResponseField>
+
+<ResponseField name="expiresAtNs" type="Int64?">
+  Expiration timestamp in nanoseconds
+</ResponseField>
+
+<ResponseField name="deliveryStatus" type="MessageDeliveryStatus">
+  Delivery status of the message:
+  - `.published` - Message successfully published
+  - `.unpublished` - Message not yet published
+  - `.failed` - Message delivery failed
+</ResponseField>
+
+<ResponseField name="topic" type="String">
+  The XMTP topic for this message
+</ResponseField>
+
+<ResponseField name="childMessages" type="[DecodedMessage]?">
+  Associated child messages (used by `messagesWithReactions()` to attach reactions)
+</ResponseField>
+
+### Methods
+
+#### content()
+
+Access the decoded message content with type casting.
+
+```swift
+public func content<T>() throws -> T
+```
+
+<ParamField path="T" type="Type" required>
+  The expected content type (String, Attachment, Reaction, etc.)
+</ParamField>
+
+<ResponseField name="return" type="T">
+  The decoded content cast to the specified type
+</ResponseField>
+
+<Warning>
+  Throws `DecodedMessageError.decodeError` if the content cannot be cast to the expected type.
+</Warning>
+
+##### Examples
+
+```swift
+// Access text content
+let text: String = try message.content()
+
+// Access reaction content
+let reaction: Reaction = try message.content()
+
+// Access attachment content
+let attachment: Attachment = try message.content()
+
+// Handle multiple content types
+let contentType = try message.encodedContent.type
+
+switch contentType.typeID {
+case "text":
+  let text: String = try message.content()
+  print("Text: \(text)")
+case "reaction":
+  let reaction: Reaction = try message.content()
+  print("Reaction: \(reaction.content)")
+case "attachment":
+  let attachment: Attachment = try message.content()
+  print("File: \(attachment.filename)")
+default:
+  print("Unknown content type")
+}
+```
+
+#### body
+
+Get the message body as a string, with fallback support.
+
+```swift
+public var body: String { get throws }
+```
+
+<ResponseField name="return" type="String">
+  The message body text, or fallback text if decoding fails
+</ResponseField>
+
+##### Example
+
+```swift
+let messageText = try message.body
+print(messageText)
+```
+
+#### fallback
+
+Get the fallback text for the message.
+
+```swift
+public var fallback: String { get throws }
+```
+
+<ResponseField name="return" type="String">
+  The fallback text from the encoded content
+</ResponseField>
+
+#### encodedContent
+
+Access the raw encoded content.
+
+```swift
+public var encodedContent: EncodedContent { get throws }
+```
+
+<ResponseField name="return" type="EncodedContent">
+  The encoded content protobuf message
+</ResponseField>
+
+##### Example
+
+```swift
+let encoded = try message.encodedContent
+let contentType = encoded.type
+print("Content type: \(contentType.typeID)")
+```
+
+## DecodedMessageV2
+
+Enhanced message structure with enriched metadata, returned by `enrichedMessages()`.
+
+```swift
+public struct DecodedMessageV2: Identifiable
+```
+
+### Properties
+
+Includes all properties from `DecodedMessage` plus:
+
+<ResponseField name="reactions" type="[DecodedMessageV2]?">
+  Array of reaction messages attached to this message. Returns nil if no reactions exist.
+</ResponseField>
+
+<ResponseField name="contentTypeId" type="ContentTypeID">
+  The content type identifier for this message
+</ResponseField>
+
+### Methods
+
+#### content()
+
+Access the decoded message content with automatic type mapping.
+
+```swift
+public func content<T>() throws -> T
+```
+
+The `enrichedMessages()` method automatically maps content types including:
+- Text messages (String)
+- Attachments (Attachment)
+- Reactions (Reaction)
+- Replies (Reply) with `inReplyTo` message included
+- Remote attachments (RemoteAttachment)
+- Transaction references (TransactionReference)
+- Group updates (GroupUpdated)
+- Read receipts (ReadReceipt)
+- Leave requests (LeaveRequest)
+- Deleted messages (DeletedMessage)
+
+##### Examples
+
+```swift
+// Get enriched messages
+let messages = try await group.enrichedMessages()
+
+for message in messages {
+  // Check content type
+  let contentType = message.contentTypeId.typeID
+  
+  switch contentType {
+  case "text":
+    let text: String = try message.content()
+    print("Message: \(text)")
+    
+    // Check for reactions
+    if let reactions = message.reactions {
+      for reaction in reactions {
+        let reactionContent: Reaction = try reaction.content()
+        print("  Reaction: \(reactionContent.content) from \(reaction.senderInboxId)")
+      }
+    }
+    
+  case "reply":
+    let reply: Reply = try message.content()
+    print("Reply to: \(reply.reference)")
+    // Access original message
+    if let originalMessage = reply.inReplyTo {
+      print("Original: \(try originalMessage.body)")
+    }
+    
+  case "attachment":
+    let attachment: Attachment = try message.content()
+    print("File: \(attachment.filename) (\(attachment.data.count) bytes)")
+    
+  case "deleted_message":
+    let deleted: DeletedMessage = try message.content()
+    print("Message deleted by: \(deleted.deletedBy)")
+    
+  default:
+    print("Other content type: \(contentType)")
+  }
+}
+```
+
+#### Working with Reactions
+
+```swift
+let messages = try await group.enrichedMessages()
+
+// Find messages with reactions
+let messagesWithReactions = messages.filter { $0.reactions != nil }
+
+for message in messagesWithReactions {
+  let text: String = try message.content()
+  print("Message: \(text)")
+  
+  if let reactions = message.reactions {
+    print("  Reactions: \(reactions.count)")
+    
+    // Group reactions by content
+    let reactionCounts = Dictionary(grouping: reactions) { reaction in
+      let content: Reaction = try? reaction.content()
+      return content?.content ?? ""
+    }.mapValues { $0.count }
+    
+    for (emoji, count) in reactionCounts {
+      print("  \(emoji): \(count)")
+    }
+  }
+}
+```
+
+## MessageDeliveryStatus
+
+Enum representing message delivery status.
+
+```swift
+public enum MessageDeliveryStatus: String, Sendable {
+  case all
+  case published
+  case unpublished
+  case failed
+}
+```
+
+- **all** - All messages regardless of status
+- **published** - Successfully published messages
+- **unpublished** - Messages not yet published to the network
+- **failed** - Messages that failed to publish
+
+## SortDirection
+
+Enum for sorting messages.
+
+```swift
+public enum SortDirection {
+  case ascending
+  case descending
+}
+```
+
+## MessageSortBy
+
+Enum for sorting criteria.
+
+```swift
+public enum MessageSortBy {
+  case sentAt
+  case insertedAt
+}
+```
+
+- **sentAt** - Sort by message sent timestamp
+- **insertedAt** - Sort by database insertion timestamp
+
+## Usage Examples
+
+### Display Messages with Reactions
+
+```swift
+let messages = try await group.enrichedMessages()
+
+for message in messages {
+  // Display message
+  print("[\(message.sentAt)] \(message.senderInboxId):")
+  print("  \(try message.body)")
+  
+  // Display reactions
+  if let reactions = message.reactions, !reactions.isEmpty {
+    let reactionEmojis = reactions.compactMap { reaction -> String? in
+      let content: Reaction? = try? reaction.content()
+      return content?.content
+    }
+    print("  Reactions: \(reactionEmojis.joined(separator: " "))")
+  }
+}
+```
+
+### Filter Messages by Type
+
+```swift
+let messages = try await group.messages()
+
+// Get only text messages
+let textMessages = messages.compactMap { message -> String? in
+  let contentType = try? message.encodedContent.type
+  if contentType?.typeID == "text" {
+    return try? message.content()
+  }
+  return nil
+}
+
+// Get all reactions
+let reactions = messages.compactMap { message -> Reaction? in
+  let contentType = try? message.encodedContent.type
+  if contentType?.typeID == "reaction" {
+    return try? message.content()
+  }
+  return nil
+}
+```
+
+### Check Message Status
+
+```swift
+for message in try await group.messages() {
+  switch message.deliveryStatus {
+  case .published:
+    print("✓ Message sent")
+  case .unpublished:
+    print("⏳ Sending...")
+  case .failed:
+    print("✗ Failed to send")
+  default:
+    break
+  }
+}
+```
+
+### Handle Disappearing Messages
+
+```swift
+let messages = try await group.messages()
+
+for message in messages {
+  if let expiresAt = message.expiresAt {
+    let timeRemaining = expiresAt.timeIntervalSinceNow
+    if timeRemaining > 0 {
+      print("Message expires in \(Int(timeRemaining)) seconds")
+    } else {
+      print("Message has expired")
+    }
+  }
+}
+```
+
+## See Also
+
+- [Messages API](/api/messages) - Methods for sending and retrieving messages
+- [Content Types](/api/codecs/text) - Available content types and codecs
+- [Group API](/api/group) - Group conversation methods
+- [DM API](/api/dm) - Direct message methods

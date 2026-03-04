@@ -1,30 +1,11 @@
 {
-  "$schema": "https://mintlify.com/docs.json",
-  "name": "XMTP iOS SDK",
+  "projectType": "sdk-library",
+  "projectName": "XMTP iOS SDK",
+  "projectDescription": "Swift implementation of an XMTP message API client for use with iOS applications",
   "theme": "palm",
-  "mode": "custom",
-  "colors": {
-    "primary": "#7C3AED",
-    "light": "#A78BFA",
-    "dark": "#6D28D9"
-  },
-  "favicon": "/favicon.svg",
-  "logo": {
-    "light": "/logo/light.svg",
-    "dark": "/logo/dark.svg"
-  },
-  "navbar": {
-    "primary": {
-      "type": "github",
-      "href": "https://github.com/xmtp/xmtp-ios"
-    }
-  },
-  "footer": {
-    "socials": {
-      "github": "https://github.com/xmtp/xmtp-ios",
-      "x": "https://x.com/xmtp_"
-    }
-  },
+  "primaryColor": "#7C3AED",
+  "lightColor": "#A78BFA",
+  "darkColor": "#6D28D9",
   "navigation": {
     "tabs": [
       {
@@ -113,5 +94,35 @@
         ]
       }
     ]
-  }
+  },
+  "keyFeatures": [
+    "End-to-end encrypted messaging using MLS protocol",
+    "Group chat and direct messaging support",
+    "Extensible content type system with built-in codecs",
+    "Push notification support",
+    "Disappearing messages",
+    "Message reactions and replies",
+    "File attachments and remote attachments",
+    "Fork recovery for offline message sync"
+  ],
+  "publicApiSurface": [
+    "Client",
+    "Client.create()",
+    "Client.build()",
+    "Conversations",
+    "Group",
+    "Dm",
+    "Conversation",
+    "DecodedMessage",
+    "ContentCodec",
+    "TextCodec",
+    "AttachmentCodec",
+    "RemoteAttachmentCodec",
+    "ReactionCodec",
+    "ReplyCodec",
+    "ReadReceiptCodec",
+    "ClientOptions",
+    "SigningKey",
+    "XMTPEnvironment"
+  ]
 }

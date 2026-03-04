@@ -1,0 +1,279 @@
+---
+title: SigningKey
+description: Protocol for wallet signing in XMTP
+---
+
+`SigningKey` is a protocol that defines a standardized signing interface for XMTP clients. It supports multiple signing methods including Externally Owned Accounts (EOA), Smart Contract Wallets (SCW), and Passkeys.
+
+## Protocol definition
+
+```swift
+public protocol SigningKey {
+    var identity: PublicIdentity { get }
+    var type: SignerType { get }
+    var chainId: Int64? { get }
+    var blockNumber: Int64? { get }
+    func sign(_ message: String) async throws -> SignedData
+}
+```
+
+## Required properties
+
+<ParamField path="identity" type="PublicIdentity" required>
+  The identity associated with the signing key. Contains:
+  - `kind`: Either `.ethereum` or `.passkey`
+  - `identifier`: Ethereum address or Passkey identifier
+</ParamField>
+
+<ParamField path="type" type="SignerType" default=".EOA">
+  The type of signer:
+  - `.EOA`: Externally Owned Account (standard wallet)
+  - `.SCW`: Smart Contract Wallet
+</ParamField>
+
+<ParamField path="chainId" type="Int64?" default="nil">
+  The blockchain chain ID. Required for Smart Contract Wallets, `nil` for EOA and Passkeys.
+</ParamField>
+
+<ParamField path="blockNumber" type="Int64?" default="nil">
+  Optional block number for verification, primarily used with Smart Contract Wallets.
+</ParamField>
+
+## Required method
+
+### sign(_:)
+
+Signs a message and returns a `SignedData` structure containing the signature and metadata.
+
+```swift
+func sign(_ message: String) async throws -> SignedData
+```
+
+**Parameters:**
+- `message`: The string message to sign
+
+**Returns:** A `SignedData` structure containing:
+- `rawData`: The signature bytes
+- `publicKey`: Public key (optional, required for Passkeys)
+- `authenticatorData`: WebAuthn authenticator data (Passkeys only)
+- `clientDataJson`: WebAuthn client data JSON (Passkeys only)
+
+**Throws:** An error if signing fails
+
+## Default implementations
+
+The protocol provides default implementations for optional properties:
+
+```swift
+public extension SigningKey {
+    var type: SignerType { .EOA }
+    var chainId: Int64? { nil }
+    var blockNumber: Int64? { nil }
+}
+```
+
+## Example implementations
+
+### Basic EOA implementation
+
+```swift
+import XMTP
+import web3
+
+class EthereumSigner: SigningKey {
+    let privateKey: String
+    let address: String
+    
+    var identity: PublicIdentity {
+        PublicIdentity(kind: .ethereum, identifier: address)
+    }
+    
+    // Uses default EOA type
+    
+    init(privateKey: String, address: String) {
+        self.privateKey = privateKey
+        self.address = address
+    }
+    
+    func sign(_ message: String) async throws -> SignedData {
+        // Sign using your preferred Ethereum library
+        let signature = try signEthereumMessage(message, with: privateKey)
+        return SignedData(rawData: signature)
+    }
+}
+```
+
+### Smart Contract Wallet implementation
+
+```swift
+class SmartContractWalletSigner: SigningKey {
+    let walletAddress: String
+    let chainId: Int64
+    let blockNumber: Int64?
+    
+    var identity: PublicIdentity {
+        PublicIdentity(kind: .ethereum, identifier: walletAddress)
+    }
+    
+    var type: SignerType {
+        .SCW
+    }
+    
+    init(walletAddress: String, chainId: Int64, blockNumber: Int64? = nil) {
+        self.walletAddress = walletAddress
+        self.chainId = chainId
+        self.blockNumber = blockNumber
+    }
+    
+    func sign(_ message: String) async throws -> SignedData {
+        // Sign using smart contract wallet (e.g., EIP-1271)
+        let signature = try await signWithSmartContract(message)
+        return SignedData(rawData: signature)
+    }
+}
+```
+
+### Passkey implementation
+
+```swift
+import AuthenticationServices
+
+class PasskeySigner: SigningKey {
+    let passkeyId: String
+    
+    var identity: PublicIdentity {
+        PublicIdentity(kind: .passkey, identifier: passkeyId)
+    }
+    
+    var type: SignerType {
+        .EOA // Passkeys use EOA type
+    }
+    
+    init(passkeyId: String) {
+        self.passkeyId = passkeyId
+    }
+    
+    func sign(_ message: String) async throws -> SignedData {
+        // Use WebAuthn/Passkey APIs
+        let challenge = message.data(using: .utf8)!
+        
+        // Request passkey signature
+        let assertion = try await requestPasskeyAssertion(challenge: challenge)
+        
+        return SignedData(
+            rawData: assertion.signature,
+            publicKey: assertion.publicKey,
+            authenticatorData: assertion.authenticatorData,
+            clientDataJson: assertion.clientDataJSON
+        )
+    }
+}
+```
+
+## Usage with Client
+
+```swift
+import XMTP
+
+// Create signing key
+let signer = EthereumSigner(
+    privateKey: "0x...",
+    address: "0x..."
+)
+
+// Create client with signing key
+let options = ClientOptions(
+    api: ClientOptions.Api(env: .production),
+    dbEncryptionKey: encryptionKey
+)
+
+let client = try await Client.create(
+    account: signer,
+    options: options
+)
+```
+
+## Identity types
+
+### PublicIdentity
+
+Represents a public identity for a signer:
+
+```swift
+public struct PublicIdentity {
+    public init(kind: IdentityKind, identifier: String)
+    public var kind: IdentityKind { get }
+    public var identifier: String { get }
+}
+```
+
+### IdentityKind
+
+```swift
+public enum IdentityKind {
+    case ethereum  // Ethereum address (EOA or SCW)
+    case passkey   // Passkey identifier
+}
+```
+
+### SignerType
+
+```swift
+public enum SignerType {
+    case EOA  // Externally Owned Account
+    case SCW  // Smart Contract Wallet
+}
+```
+
+## Signature data
+
+### SignedData
+
+Contains the signature and associated metadata:
+
+```swift
+public struct SignedData {
+    public let rawData: Data              // The signature bytes
+    public let publicKey: Data?           // Public key (required for Passkeys)
+    public let authenticatorData: Data?   // WebAuthn data (Passkeys only)
+    public let clientDataJson: Data?      // WebAuthn data (Passkeys only)
+}
+```
+
+## Best practices
+
+1. **Secure key storage**: Never expose private keys. Use secure storage like Keychain.
+
+2. **Error handling**: Implement proper error handling in the `sign()` method:
+   ```swift
+   func sign(_ message: String) async throws -> SignedData {
+       guard let signature = try? signMessage(message) else {
+           throw SigningError.signatureFailed
+       }
+       return SignedData(rawData: signature)
+   }
+   ```
+
+3. **Chain ID validation**: For SCW implementations, always validate the chain ID:
+   ```swift
+   guard chainId == expectedChainId else {
+       throw SigningError.invalidChainId
+   }
+   ```
+
+4. **Async operations**: The `sign()` method is async, allowing for user interaction:
+   ```swift
+   func sign(_ message: String) async throws -> SignedData {
+       // Show user confirmation UI
+       let approved = await requestUserApproval(message)
+       guard approved else {
+           throw SigningError.userRejected
+       }
+       return try await performSigning(message)
+   }
+   ```
+
+## Related APIs
+
+- [Client](/api/client) - Using the signing key to create clients
+- [ClientOptions](/api/client-options) - Client configuration options

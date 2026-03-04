@@ -1,0 +1,285 @@
+---
+title: Client
+description: Understanding the XMTP Client - the core entry point for messaging
+---
+
+## Overview
+
+The `Client` is the main entry point for interacting with the XMTP network. It represents a user's connection to XMTP and manages all messaging operations, including conversations, messages, and encryption.
+
+Every XMTP application starts by creating a Client instance, which authenticates the user and establishes a secure connection to the XMTP network.
+
+## Key Concepts
+
+### Inbox ID
+
+Each client is identified by a unique **inbox ID** - a stable identifier that persists across sessions and devices. The inbox ID is derived from the user's wallet address but is distinct from it.
+
+```swift
+let client = try await Client.create(account: wallet)
+print("Inbox ID: \(client.inboxID)")
+```
+
+<Note>
+Inbox IDs allow users to maintain their messaging identity even if they change wallet addresses or use multiple wallets.
+</Note>
+
+### Installation ID
+
+Each client instance also has an **installation ID** that uniquely identifies the device or application installation. This enables multi-device support.
+
+```swift
+print("Installation ID: \(client.installationID)")
+```
+
+## Client Lifecycle
+
+### Creating a Client
+
+There are two main ways to create a client:
+
+#### 1. Client.create() - First Time Setup
+
+Use `create()` when setting up XMTP for the first time:
+
+```swift
+let client = try await Client.create(
+  account: wallet,
+  options: ClientOptions(
+    api: .init(env: .production),
+    dbEncryptionKey: encryptionKey
+  )
+)
+```
+
+#### 2. Client.build() - Returning Users
+
+Use `build()` for returning users who already have an inbox:
+
+```swift
+let client = try await Client.build(
+  address: walletAddress,
+  options: ClientOptions(
+    api: .init(env: .production),
+    dbEncryptionKey: encryptionKey
+  )
+)
+```
+
+<Warning>
+**Important**: You must use the same `dbEncryptionKey` for a user across sessions. Store this key securely in the iOS Keychain.
+</Warning>
+
+### Authentication
+
+The client authenticates users through their wallet using the `SigningKey` protocol:
+
+```swift
+// The wallet must conform to SigningKey protocol
+class MyWallet: SigningKey {
+  var address: String { /* ... */ }
+  var publicIdentity: PublicIdentity { /* ... */ }
+  
+  func sign(_ data: Data) async throws -> SignedData {
+    // Implement signing logic
+  }
+}
+
+let wallet = MyWallet()
+let client = try await Client.create(account: wallet)
+```
+
+## Client Configuration
+
+### Environment
+
+Choose the appropriate XMTP network environment:
+
+- **`.production`** - Live network for production apps
+- **`.dev`** - Development network for testing
+- **`.local`** - Local node for development
+
+```swift
+let options = ClientOptions(
+  api: .init(env: .production),
+  dbEncryptionKey: encryptionKey
+)
+```
+
+### Database Encryption
+
+All client data is stored in an encrypted SQLite database:
+
+```swift
+import CryptoKit
+
+// Generate a secure encryption key
+let encryptionKey = SymmetricKey(size: .bits256)
+let keyData = encryptionKey.withUnsafeBytes { Data($0) }
+
+let options = ClientOptions(
+  api: .init(env: .production),
+  dbEncryptionKey: keyData
+)
+```
+
+<Tip>
+Store the encryption key in the iOS Keychain for secure persistence across app launches.
+</Tip>
+
+### Custom Codecs
+
+Register custom content types to extend messaging capabilities:
+
+```swift
+let options = ClientOptions(
+  api: .init(env: .production),
+  codecs: [TextCodec(), AttachmentCodec(), CustomCodec()],
+  dbEncryptionKey: encryptionKey
+)
+```
+
+## Client Properties
+
+### Identity Information
+
+```swift
+let inboxID: String          // Unique inbox identifier
+let installationID: String    // Device/installation identifier  
+let publicIdentity: PublicIdentity  // User's public identity
+let environment: XMTPEnvironment    // Network environment
+```
+
+### Version Information
+
+```swift
+let libXMTPVersion: String    // LibXMTP library version
+```
+
+### Database Path
+
+```swift
+let dbPath: String            // Path to encrypted database
+```
+
+## Client Capabilities
+
+Once created, the client provides access to core XMTP functionality:
+
+### Conversations
+
+```swift
+let client = try await Client.create(account: wallet)
+
+// Access conversations manager
+let conversations = client.conversations
+
+// Create a new group
+let group = try await conversations.newGroup(with: [peerAddress])
+
+// List all conversations
+let allConversations = try await conversations.list()
+```
+
+### Preferences
+
+```swift
+// Access user preferences
+let preferences = client.preferences
+
+// Set consent preferences
+try await preferences.setConsentState(addresses: [address], state: .allowed)
+```
+
+### Debug Information
+
+```swift
+// Access debug info for troubleshooting
+let debugInfo = client.debugInformation
+```
+
+## Multi-Device Support
+
+XMTP supports multiple devices/installations per inbox:
+
+```swift
+// Each client instance gets its own installation ID
+let client1 = try await Client.create(account: wallet) // Installation 1
+let client2 = try await Client.create(account: wallet) // Installation 2
+
+// Both share the same inbox ID
+assert(client1.inboxID == client2.inboxID)
+
+// But have different installation IDs
+assert(client1.installationID != client2.installationID)
+```
+
+## Checking Message Capabilities
+
+Before messaging users, check if they're on the XMTP network:
+
+```swift
+// Check if addresses can message
+let canMessage = try await client.canMessage(addresses: [address1, address2])
+
+for (address, capable) in canMessage {
+  if capable {
+    print("\(address) is on XMTP")
+  }
+}
+```
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Secure Key Management">
+    - Store the `dbEncryptionKey` in the iOS Keychain
+    - Never hardcode encryption keys in your app
+    - Generate unique keys per user
+    - Use secure key generation (CryptoKit's `SymmetricKey`)
+  </Accordion>
+
+  <Accordion title="Environment Selection">
+    - Use `.production` for live apps
+    - Use `.dev` for development and testing
+    - Never mix data between environments
+    - Configure environment early in app lifecycle
+  </Accordion>
+
+  <Accordion title="Error Handling">
+    - Always handle `ClientError.creationError`
+    - Check network connectivity before creating client
+    - Implement retry logic for transient failures
+    - Provide clear user feedback for auth failures
+  </Accordion>
+
+  <Accordion title="Resource Management">
+    - Create one client instance per user session
+    - Reuse the client throughout your app
+    - Clean up resources when user logs out
+    - Consider using a singleton or dependency injection
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Creating a Client" icon="rocket" href="/guides/creating-client">
+    Step-by-step guide to creating and configuring a client
+  </Card>
+  <Card title="Conversations" icon="messages" href="/concepts/conversations">
+    Learn about managing conversations
+  </Card>
+  <Card title="Client API" icon="code" href="/api/client">
+    Complete API reference for the Client class
+  </Card>
+  <Card title="Client Options" icon="gear" href="/api/client-options">
+    Configuration options reference
+  </Card>
+</CardGroup>
+
+## Related
+
+- [SigningKey Protocol](/api/signing-key) - Wallet integration
+- [XMTPEnvironment](/api/environment) - Network environments
+- [Encryption](/advanced/encryption) - Security and encryption details

@@ -1,0 +1,216 @@
+---
+title: Installation
+description: Install the XMTP iOS SDK using Swift Package Manager or CocoaPods
+---
+
+The XMTP iOS SDK can be installed using Swift Package Manager (recommended) or CocoaPods.
+
+## Requirements
+
+Before installing, ensure your project meets these requirements:
+
+- iOS 14.0+ or macOS 11.0+
+- Swift 5.6+
+- Xcode 13.0+
+
+## Swift Package Manager (Recommended)
+
+Swift Package Manager is the recommended way to install the XMTP iOS SDK.
+
+<Steps>
+  <Step title="Open your Xcode project">
+    Launch Xcode and open your project.
+  </Step>
+
+  <Step title="Add Package Dependency">
+    1. In Xcode, go to **File > Add Package Dependencies...**
+    2. In the search bar, enter the XMTP iOS repository URL:
+    
+    ```
+    https://github.com/xmtp/xmtp-ios
+    ```
+    
+    3. Click **Add Package**
+  </Step>
+
+  <Step title="Select Version">
+    Choose the version rule:
+    - **Recommended**: Select "Up to Next Major Version" and enter `4.0.0`
+    - **Specific version**: Choose a specific release from the [releases page](https://github.com/xmtp/xmtp-ios/releases)
+    
+    Click **Add Package** to confirm.
+  </Step>
+
+  <Step title="Select Products">
+    In the "Choose Package Products" dialog:
+    1. Select **XMTPiOS** for your main target
+    2. (Optional) Select **XMTPTestHelpers** if you need testing utilities
+    
+    Click **Add Package** to finish.
+  </Step>
+</Steps>
+
+### Add to Package.swift
+
+If you're building a Swift package, add XMTP as a dependency in your `Package.swift`:
+
+```swift Package.swift
+import PackageDescription
+
+let package = Package(
+    name: "YourPackage",
+    platforms: [.iOS(.v14), .macOS(.v11)],
+    products: [
+        .library(
+            name: "YourPackage",
+            targets: ["YourPackage"]
+        )
+    ],
+    dependencies: [
+        .package(
+            url: "https://github.com/xmtp/xmtp-ios",
+            from: "4.0.0"
+        )
+    ],
+    targets: [
+        .target(
+            name: "YourPackage",
+            dependencies: [
+                .product(name: "XMTPiOS", package: "xmtp-ios")
+            ]
+        )
+    ]
+)
+```
+
+## CocoaPods
+
+If your project uses CocoaPods, you can install the SDK via the XMTP.podspec.
+
+<Steps>
+  <Step title="Add to Podfile">
+    Add XMTP to your `Podfile`:
+
+    ```ruby Podfile
+    platform :ios, '14.0'
+    use_frameworks!
+
+    target 'YourApp' do
+      pod 'XMTP', '~> 4.9.0'
+    end
+    ```
+  </Step>
+
+  <Step title="Install Dependencies">
+    Run the CocoaPods installation command:
+
+    ```bash
+    pod install
+    ```
+  </Step>
+
+  <Step title="Open Workspace">
+    Open your project's `.xcworkspace` file (not `.xcodeproj`):
+
+    ```bash
+    open YourApp.xcworkspace
+    ```
+  </Step>
+</Steps>
+
+<Note>
+  The CocoaPods installation includes the `LibXMTPSwiftFFI.xcframework` binary, which provides the Rust-based cryptographic core.
+</Note>
+
+## Verify Installation
+
+Verify that the SDK is installed correctly by importing it in your Swift code:
+
+```swift
+import XMTPiOS
+
+// Check the SDK version
+let version = getVersionInfo()
+print("XMTP iOS SDK version: \(version)")
+```
+
+If the import succeeds without errors, the installation is complete.
+
+## SDK Dependencies
+
+The XMTP iOS SDK includes the following dependencies:
+
+- **LibXMTPSwiftFFI**: Rust-based core library for MLS protocol and cryptography
+- **Connect-Swift** (v1.2.0): gRPC connectivity
+- **CryptoSwift** (v1.8.3-1.8.4): Additional cryptographic utilities
+- **SQLCipher** (v4.5.7, CocoaPods only): Encrypted database support
+
+These dependencies are automatically managed when you install the SDK.
+
+## Project Configuration
+
+### Enable Background Modes (Optional)
+
+If you want to receive messages while your app is in the background, enable background modes:
+
+1. In Xcode, select your target
+2. Go to **Signing & Capabilities**
+3. Click **+ Capability** and add **Background Modes**
+4. Enable **Remote notifications**
+
+### Configure App Transport Security (Local Development)
+
+If you're using the local development environment, you may need to allow insecure connections:
+
+```xml Info.plist
+<key>NSAppTransportSecurity</key>
+<dict>
+    <key>NSAllowsArbitraryLoads</key>
+    <true/>
+</dict>
+```
+
+<Warning>
+  Only use this configuration during local development. Remove it before deploying to production.
+</Warning>
+
+## Troubleshooting
+
+### Binary Target Checksum Error
+
+If you encounter a checksum error with `LibXMTPSwiftFFI`:
+
+1. Clean your build folder: **Product > Clean Build Folder**
+2. Delete derived data: `rm -rf ~/Library/Developer/Xcode/DerivedData`
+3. Reset package caches: **File > Packages > Reset Package Caches**
+4. Rebuild your project
+
+### CocoaPods Link Errors
+
+If you see linker errors after installing via CocoaPods:
+
+1. Ensure you're opening the `.xcworkspace` file, not `.xcodeproj`
+2. Run `pod deintegrate` followed by `pod install`
+3. Clean and rebuild your project
+
+### Minimum Deployment Target
+
+If you see errors about deployment targets:
+
+1. Ensure your app's minimum deployment target is iOS 14.0 or higher
+2. Check that all dependencies support iOS 14.0+
+
+## Next Steps
+
+Now that you have the SDK installed, you're ready to build your first messaging app:
+
+<Card title="Quickstart Guide" icon="rocket" href="./quickstart">
+  Build a working messaging app in minutes
+</Card>
+
+## Additional Resources
+
+- [XMTP iOS SDK on GitHub](https://github.com/xmtp/xmtp-ios)
+- [Swift Package Index](https://swiftpackageindex.com/xmtp/xmtp-ios)
+- [Release Notes](https://github.com/xmtp/xmtp-ios/releases)
+- [Example App](https://github.com/xmtp/xmtp-ios/tree/main/example)

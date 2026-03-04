@@ -1,0 +1,444 @@
+---
+title: Codecs & Content Types
+description: Understanding the extensible content type system in XMTP
+---
+
+## Overview
+
+Codecs (content encoders/decoders) are the mechanism XMTP uses to support different types of message content beyond plain text. The codec system is extensible, allowing you to send rich content like images, reactions, replies, and even custom content types.
+
+Every piece of content in XMTP has a **content type** that identifies how it should be encoded and decoded.
+
+## Content Types
+
+### Content Type Structure
+
+A content type is identified by three components:
+
+```swift
+public struct ContentTypeID {
+  let authorityID: String    // Author of the content type
+  let typeID: String        // Type identifier
+  let versionMajor: UInt    // Major version
+  let versionMinor: UInt    // Minor version
+}
+```
+
+Example:
+```swift
+let ContentTypeText = ContentTypeID(
+  authorityID: "xmtp.org",
+  typeID: "text",
+  versionMajor: 1,
+  versionMinor: 0
+)
+```
+
+## Built-in Content Types
+
+XMTP provides several standard content types out of the box:
+
+### 1. Text Messages
+
+Simple UTF-8 text messages (default):
+
+```swift
+try await group.send(content: "Hello!")
+// Uses ContentTypeText automatically
+```
+
+### 2. Attachments
+
+Files embedded directly in messages:
+
+```swift
+let attachment = Attachment(
+  filename: "photo.jpg",
+  mimeType: "image/jpeg",
+  data: imageData
+)
+try await group.send(
+  content: attachment,
+  options: .init(contentType: ContentTypeAttachment)
+)
+```
+
+### 3. Remote Attachments
+
+Large files stored externally:
+
+```swift
+let remoteAttachment = RemoteAttachment(
+  url: "https://example.com/file.pdf",
+  contentDigest: digest,
+  secret: encryptionSecret,
+  salt: salt,
+  nonce: nonce,
+  scheme: "https"
+)
+try await group.send(
+  content: remoteAttachment,
+  options: .init(contentType: ContentTypeRemoteAttachment)
+)
+```
+
+### 4. Reactions
+
+Emoji reactions to messages:
+
+```swift
+let reaction = Reaction(
+  reference: messageId,
+  action: .added,
+  schema: .unicode,
+  content: "❤️"
+)
+try await group.send(
+  content: reaction,
+  options: .init(contentType: ContentTypeReaction)
+)
+```
+
+### 5. Replies
+
+Threaded message replies:
+
+```swift
+let reply = Reply(
+  reference: originalMessageId,
+  content: "Great point!"
+)
+try await group.send(
+  content: reply,
+  options: .init(contentType: ContentTypeReply)
+)
+```
+
+### 6. Read Receipts
+
+Notify others you've read their messages:
+
+```swift
+let receipt = ReadReceipt(
+  timestamp: Date()
+)
+try await group.send(
+  content: receipt,
+  options: .init(contentType: ContentTypeReadReceipt)
+)
+```
+
+## The ContentCodec Protocol
+
+Codecs implement the `ContentCodec` protocol:
+
+```swift
+public protocol ContentCodec {
+  typealias ContentType = Sendable
+  
+  var contentType: ContentTypeID { get }
+  
+  func encode(content: ContentType, client: Client) throws -> EncodedContent
+  
+  func decode(content: EncodedContent, client: Client) throws -> ContentType
+  
+  func fallback(content: ContentType) -> String?
+  
+  func shouldPush(content: ContentType) -> Bool
+}
+```
+
+### Codec Components
+
+#### contentType
+Identifies what type of content this codec handles:
+
+```swift
+var contentType: ContentTypeID {
+  ContentTypeID(
+    authorityID: "xmtp.org",
+    typeID: "text",
+    versionMajor: 1,
+    versionMinor: 0
+  )
+}
+```
+
+#### encode()
+Converts your content into bytes for transmission:
+
+```swift
+func encode(content: String, client: Client) throws -> EncodedContent {
+  var encodedContent = EncodedContent()
+  encodedContent.type = contentType
+  encodedContent.content = Data(content.utf8)
+  return encodedContent
+}
+```
+
+#### decode()
+Converts received bytes back into your content type:
+
+```swift
+func decode(content: EncodedContent, client: Client) throws -> String {
+  guard let text = String(data: content.content, encoding: .utf8) else {
+    throw CodecError.invalidContent
+  }
+  return text
+}
+```
+
+#### fallback()
+Provides a text representation for clients that don't support this content type:
+
+```swift
+func fallback(content: Attachment) -> String? {
+  "[Attachment: \(content.filename)]"
+}
+```
+
+#### shouldPush()
+Indicates if this content should trigger push notifications:
+
+```swift
+func shouldPush(content: ReadReceipt) -> Bool {
+  false  // Don't notify for read receipts
+}
+```
+
+## Registering Codecs
+
+### At Client Creation
+
+Register codecs when creating the client:
+
+```swift
+let options = ClientOptions(
+  api: .init(env: .production),
+  codecs: [
+    TextCodec(),
+    AttachmentCodec(),
+    ReactionCodec(),
+    ReplyCodec()
+  ],
+  dbEncryptionKey: encryptionKey
+)
+
+let client = try await Client.create(account: wallet, options: options)
+```
+
+### After Client Creation
+
+Register codecs dynamically:
+
+```swift
+Client.register(codec: CustomCodec())
+```
+
+<Note>
+Codecs registered with `Client.register()` are available to all client instances in your app.
+</Note>
+
+## Creating Custom Codecs
+
+### Example: LocationCodec
+
+```swift
+// 1. Define your content type
+struct Location: Codable {
+  let latitude: Double
+  let longitude: Double
+  let address: String?
+}
+
+// 2. Define the content type ID
+let ContentTypeLocation = ContentTypeID(
+  authorityID: "myapp.com",
+  typeID: "location",
+  versionMajor: 1,
+  versionMinor: 0
+)
+
+// 3. Implement the codec
+struct LocationCodec: ContentCodec {
+  var contentType: ContentTypeID {
+    ContentTypeLocation
+  }
+  
+  func encode(content: Location, client: Client) throws -> EncodedContent {
+    let encoder = JSONEncoder()
+    let data = try encoder.encode(content)
+    
+    var encoded = EncodedContent()
+    encoded.type = contentType
+    encoded.content = data
+    return encoded
+  }
+  
+  func decode(content: EncodedContent, client: Client) throws -> Location {
+    let decoder = JSONDecoder()
+    return try decoder.decode(Location.self, from: content.content)
+  }
+  
+  func fallback(content: Location) -> String? {
+    if let address = content.address {
+      return "📍 \(address)"
+    }
+    return "📍 Location: \(content.latitude), \(content.longitude)"
+  }
+  
+  func shouldPush(content: Location) -> Bool {
+    true
+  }
+}
+
+// 4. Register the codec
+Client.register(codec: LocationCodec())
+
+// 5. Use it!
+let location = Location(
+  latitude: 37.7749,
+  longitude: -122.4194,
+  address: "San Francisco, CA"
+)
+
+try await group.send(
+  content: location,
+  options: .init(contentType: ContentTypeLocation)
+)
+```
+
+## Content Compression
+
+Large content can be compressed before sending:
+
+```swift
+let options = SendOptions(
+  compression: .gzip,
+  contentType: ContentTypeText
+)
+
+try await group.send(content: largeText, options: options)
+```
+
+XMTP automatically decompresses compressed content when decoding.
+
+## Handling Unknown Content Types
+
+When you receive a message with an unknown content type:
+
+```swift
+do {
+  let content: CustomType = try message.content()
+  // Use the content
+} catch {
+  // Fall back to the text representation
+  let fallback = message.fallback
+  print("Unsupported content: \(fallback)")
+}
+```
+
+<Tip>
+Always implement meaningful fallback text so users with older clients can still see something useful.
+</Tip>
+
+## Content Type Versioning
+
+Version your content types to support evolution:
+
+```swift
+// Version 1.0
+let ContentTypeCustomV1 = ContentTypeID(
+  authorityID: "myapp.com",
+  typeID: "custom",
+  versionMajor: 1,
+  versionMinor: 0
+)
+
+// Version 2.0 with breaking changes
+let ContentTypeCustomV2 = ContentTypeID(
+  authorityID: "myapp.com",
+  typeID: "custom",
+  versionMajor: 2,
+  versionMinor: 0
+)
+
+// Register both for backwards compatibility
+Client.register(codec: CustomCodecV1())
+Client.register(codec: CustomCodecV2())
+```
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Register All Needed Codecs Early">
+    - Register codecs when creating the client
+    - Include all codecs your app uses
+    - Register third-party codecs if needed
+    - Use `Client.register()` for app-wide codecs
+  </Accordion>
+
+  <Accordion title="Provide Good Fallback Text">
+    - Make fallback text human-readable
+    - Include essential information
+    - Use emoji or formatting for clarity
+    - Test fallback display in UI
+  </Accordion>
+
+  <Accordion title="Version Content Types Properly">
+    - Use semantic versioning
+    - Increment major version for breaking changes
+    - Support multiple versions if needed
+    - Document version changes
+  </Accordion>
+
+  <Accordion title="Handle Decode Errors">
+    - Always catch decode errors
+    - Fall back to fallback text
+    - Log errors for debugging
+    - Display user-friendly error messages
+  </Accordion>
+
+  <Accordion title="Use Compression for Large Content">
+    - Enable gzip for content > 1KB
+    - Compress text, JSON, and similar formats
+    - Don't compress already-compressed data (images, videos)
+    - Test compression ratios
+  </Accordion>
+</AccordionGroup>
+
+## Codec Registry
+
+The codec registry manages all registered codecs:
+
+```swift
+// Register a codec globally
+Client.register(codec: MyCodec())
+
+// The registry finds the right codec when decoding
+let content: MyType = try message.content()
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Content Types Guide" icon="palette" href="/guides/content-types">
+    Learn how to use different content types
+  </Card>
+  <Card title="Custom Codecs" icon="wrench" href="/advanced/custom-codecs">
+    Create your own custom content types
+  </Card>
+  <Card title="Built-in Codecs" icon="box" href="/api/codecs/text">
+    Reference for all built-in codecs
+  </Card>
+  <Card title="Sending Messages" icon="paper-plane" href="/guides/sending-messages">
+    Learn how to send different content types
+  </Card>
+</CardGroup>
+
+## Related
+
+- [TextCodec](/api/codecs/text) - Plain text messages
+- [AttachmentCodec](/api/codecs/attachment) - File attachments
+- [ReactionCodec](/api/codecs/reaction) - Message reactions
+- [ReplyCodec](/api/codecs/reply) - Threaded replies

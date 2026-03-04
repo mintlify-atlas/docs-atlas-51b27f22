@@ -1,0 +1,712 @@
+---
+title: "Conversation"
+description: "API reference for the Conversation enum in XMTP iOS SDK"
+---
+
+The `Conversation` enum provides a unified interface for working with both group conversations and DMs. It wraps either a `Group` or `Dm` and provides common methods that work with both types.
+
+## Overview
+
+```swift
+public enum Conversation {
+    case group(Group)
+    case dm(Dm)
+}
+```
+
+Use `Conversation` when you want to handle both groups and DMs uniformly without needing to check the specific type.
+
+## Type Checking
+
+### type
+
+```swift
+public var type: XMTPConversationType
+```
+
+Get the conversation type.
+
+```swift
+public enum XMTPConversationType {
+    case group
+    case dm
+}
+```
+
+```swift
+switch conversation.type {
+case .group:
+    print("This is a group")
+case .dm:
+    print("This is a DM")
+}
+```
+
+### Extracting Specific Types
+
+You can pattern match to access the underlying type:
+
+```swift
+switch conversation {
+case .group(let group):
+    // Access group-specific properties
+    let name = try group.name()
+case .dm(let dm):
+    // Access DM-specific properties
+    let peerId = try dm.peerInboxId
+}
+```
+
+## Properties
+
+### id
+
+```swift
+public var id: String
+```
+
+The unique identifier for the conversation.
+
+### topic
+
+```swift
+public var topic: String
+```
+
+The topic string for push notifications and streaming.
+
+### createdAt
+
+```swift
+public var createdAt: Date
+```
+
+When the conversation was created.
+
+### createdAtNs
+
+```swift
+public var createdAtNs: Int64
+```
+
+Creation timestamp in nanoseconds.
+
+### lastActivityAtNs
+
+```swift
+public var lastActivityAtNs: Int64
+```
+
+Timestamp of the last activity in nanoseconds.
+
+### client
+
+```swift
+public var client: Client
+```
+
+The client instance associated with this conversation.
+
+### disappearingMessageSettings
+
+```swift
+public var disappearingMessageSettings: DisappearingMessageSettings?
+```
+
+The disappearing message settings if enabled.
+
+## Sending Messages
+
+### send()
+
+Send a message to the conversation.
+
+```swift
+@discardableResult
+public func send<T>(
+    content: T,
+    options: SendOptions? = nil,
+    fallback: String? = nil
+) async throws -> String
+```
+
+<ParamField path="content" type="T" required>
+  The content to send
+</ParamField>
+
+<ParamField path="options" type="SendOptions" optional>
+  Send options
+</ParamField>
+
+<ParamField path="fallback" type="String" optional>
+  Fallback text (unused, for API compatibility)
+</ParamField>
+
+<ResponseField name="messageId" type="String">
+  The hex-encoded message ID
+</ResponseField>
+
+```swift
+let messageId = try await conversation.send(content: "Hello!")
+```
+
+### send(text:options:)
+
+Send a text message.
+
+```swift
+public func send(
+    text: String,
+    options: SendOptions? = nil
+) async throws -> String
+```
+
+<ParamField path="text" type="String" required>
+  The text message to send
+</ParamField>
+
+<ParamField path="options" type="SendOptions" optional>
+  Send options
+</ParamField>
+
+<ResponseField name="messageId" type="String">
+  The hex-encoded message ID
+</ResponseField>
+
+### send(encodedContent:visibilityOptions:)
+
+Send pre-encoded content.
+
+```swift
+@discardableResult
+public func send(
+    encodedContent: EncodedContent,
+    visibilityOptions: MessageVisibilityOptions? = nil
+) async throws -> String
+```
+
+<ParamField path="encodedContent" type="EncodedContent" required>
+  The pre-encoded content
+</ParamField>
+
+<ParamField path="visibilityOptions" type="MessageVisibilityOptions" optional>
+  Message visibility options
+</ParamField>
+
+<ResponseField name="messageId" type="String">
+  The hex-encoded message ID
+</ResponseField>
+
+### prepareMessage()
+
+Prepare a message for sending.
+
+```swift
+public func prepareMessage<T>(
+    content: T,
+    options: SendOptions? = nil,
+    noSend: Bool = false
+) async throws -> String
+```
+
+<ParamField path="content" type="T" required>
+  The content to prepare
+</ParamField>
+
+<ParamField path="options" type="SendOptions" optional>
+  Send options
+</ParamField>
+
+<ParamField path="noSend" type="Bool" default="false">
+  If true, only prepare without sending
+</ParamField>
+
+<ResponseField name="messageId" type="String">
+  The hex-encoded message ID
+</ResponseField>
+
+### prepareMessage(encodedContent:visibilityOptions:noSend:)
+
+Prepare pre-encoded content.
+
+```swift
+public func prepareMessage(
+    encodedContent: EncodedContent,
+    visibilityOptions: MessageVisibilityOptions? = nil,
+    noSend: Bool = false
+) async throws -> String
+```
+
+### publishMessages()
+
+Publish all prepared messages.
+
+```swift
+public func publishMessages() async throws
+```
+
+### publishMessage()
+
+Publish a specific prepared message.
+
+```swift
+public func publishMessage(messageId: String) async throws
+```
+
+<ParamField path="messageId" type="String" required>
+  The message ID to publish
+</ParamField>
+
+## Retrieving Messages
+
+### messages()
+
+Get messages from the conversation.
+
+```swift
+public func messages(
+    limit: Int? = nil,
+    beforeNs: Int64? = nil,
+    afterNs: Int64? = nil,
+    direction: SortDirection? = .descending,
+    deliveryStatus: MessageDeliveryStatus = .all,
+    excludeContentTypes: [StandardContentType]? = nil,
+    excludeSenderInboxIds: [String]? = nil,
+    sortBy: MessageSortBy? = nil,
+    insertedAfterNs: Int64? = nil,
+    insertedBeforeNs: Int64? = nil
+) async throws -> [DecodedMessage]
+```
+
+<ParamField path="limit" type="Int" optional>
+  Maximum number of messages to return
+</ParamField>
+
+<ParamField path="beforeNs" type="Int64" optional>
+  Messages sent before this timestamp
+</ParamField>
+
+<ParamField path="afterNs" type="Int64" optional>
+  Messages sent after this timestamp
+</ParamField>
+
+<ParamField path="direction" type="SortDirection" default=".descending">
+  Sort direction
+</ParamField>
+
+<ParamField path="deliveryStatus" type="MessageDeliveryStatus" default=".all">
+  Filter by delivery status
+</ParamField>
+
+<ParamField path="excludeContentTypes" type="[StandardContentType]" optional>
+  Content types to exclude
+</ParamField>
+
+<ParamField path="excludeSenderInboxIds" type="[String]" optional>
+  Sender inbox IDs to exclude
+</ParamField>
+
+<ParamField path="sortBy" type="MessageSortBy" optional>
+  Sort by field
+</ParamField>
+
+<ParamField path="insertedAfterNs" type="Int64" optional>
+  Filter by insertion time (after)
+</ParamField>
+
+<ParamField path="insertedBeforeNs" type="Int64" optional>
+  Filter by insertion time (before)
+</ParamField>
+
+<ResponseField name="messages" type="[DecodedMessage]">
+  Array of decoded messages
+</ResponseField>
+
+```swift
+let messages = try await conversation.messages(limit: 50)
+```
+
+<Info>
+  For UI rendering, consider using `enrichedMessages()` instead, which includes reactions, replies, and other metadata.
+</Info>
+
+### enrichedMessages()
+
+Get messages with enriched metadata.
+
+```swift
+public func enrichedMessages(
+    limit: Int? = nil,
+    beforeNs: Int64? = nil,
+    afterNs: Int64? = nil,
+    direction: SortDirection? = .descending,
+    deliveryStatus: MessageDeliveryStatus = .all,
+    excludeContentTypes: [StandardContentType]? = nil,
+    excludeSenderInboxIds: [String]? = nil,
+    sortBy: MessageSortBy? = nil,
+    insertedAfterNs: Int64? = nil,
+    insertedBeforeNs: Int64? = nil
+) async throws -> [DecodedMessageV2]
+```
+
+Parameters are the same as `messages()`.
+
+<ResponseField name="messages" type="[DecodedMessageV2]">
+  Array of enriched messages with reactions, replies, etc.
+</ResponseField>
+
+```swift
+let messages = try await conversation.enrichedMessages(limit: 50)
+for message in messages {
+    print("Message: \(message.content())")
+    print("Reactions: \(message.reactions.count)")
+}
+```
+
+<Note>
+  Recommended for UI rendering. This automatically includes reactions, replies, and other associated data.
+</Note>
+
+### messagesWithReactions()
+
+Get messages with reactions included (deprecated, use enrichedMessages instead).
+
+```swift
+public func messagesWithReactions(
+    limit: Int? = nil,
+    beforeNs: Int64? = nil,
+    afterNs: Int64? = nil,
+    direction: SortDirection? = .descending,
+    deliveryStatus: MessageDeliveryStatus = .all,
+    excludeContentTypes: [StandardContentType]? = nil,
+    excludeSenderInboxIds: [String]? = nil,
+    sortBy: MessageSortBy? = nil,
+    insertedAfterNs: Int64? = nil,
+    insertedBeforeNs: Int64? = nil
+) async throws -> [DecodedMessage]
+```
+
+### lastMessage()
+
+Get the most recent message.
+
+```swift
+public func lastMessage() async throws -> DecodedMessage?
+```
+
+<ResponseField name="message" type="DecodedMessage?">
+  The last message, or nil if no messages
+</ResponseField>
+
+```swift
+if let last = try await conversation.lastMessage() {
+    print("Last message: \(last.content())")
+}
+```
+
+### countMessages()
+
+Count messages matching criteria.
+
+```swift
+public func countMessages(
+    beforeNs: Int64? = nil,
+    afterNs: Int64? = nil,
+    deliveryStatus: MessageDeliveryStatus = .all,
+    excludeContentTypes: [StandardContentType]? = nil,
+    excludeSenderInboxIds: [String]? = nil,
+    insertedAfterNs: Int64? = nil,
+    insertedBeforeNs: Int64? = nil
+) throws -> Int64
+```
+
+<ResponseField name="count" type="Int64">
+  The number of matching messages
+</ResponseField>
+
+### deleteMessage()
+
+Delete a message by ID.
+
+```swift
+public func deleteMessage(messageId: String) async throws -> String
+```
+
+<ParamField path="messageId" type="String" required>
+  The message ID to delete
+</ParamField>
+
+<ResponseField name="deletionMessageId" type="String">
+  The ID of the deletion message
+</ResponseField>
+
+## Streaming
+
+### streamMessages()
+
+Stream new messages in real-time.
+
+```swift
+public func streamMessages(
+    onClose: (() -> Void)? = nil
+) -> AsyncThrowingStream<DecodedMessage, Error>
+```
+
+<ParamField path="onClose" type="(() -> Void)" optional>
+  Callback when the stream closes
+</ParamField>
+
+<ResponseField name="stream" type="AsyncThrowingStream<DecodedMessage, Error>">
+  Stream of new messages
+</ResponseField>
+
+```swift
+for try await message in conversation.streamMessages() {
+    print("New message: \(message.content())")
+}
+```
+
+## Member Management
+
+### members()
+
+Get all members of the conversation.
+
+```swift
+public func members() async throws -> [Member]
+```
+
+<ResponseField name="members" type="[Member]">
+  Array of conversation members
+</ResponseField>
+
+```swift
+let members = try await conversation.members()
+for member in members {
+    print("Member: \(member.inboxId)")
+}
+```
+
+## Consent Management
+
+### consentState()
+
+Get the consent state for this conversation.
+
+```swift
+public func consentState() throws -> ConsentState
+```
+
+<ResponseField name="state" type="ConsentState">
+  The consent state (.allowed, .denied, or .unknown)
+</ResponseField>
+
+### updateConsentState()
+
+Update the consent state.
+
+```swift
+public func updateConsentState(state: ConsentState) async throws
+```
+
+<ParamField path="state" type="ConsentState" required>
+  The new consent state
+</ParamField>
+
+```swift
+try await conversation.updateConsentState(state: .allowed)
+```
+
+## Disappearing Messages
+
+### isDisappearingMessagesEnabled()
+
+Check if disappearing messages are enabled.
+
+```swift
+public func isDisappearingMessagesEnabled() throws -> Bool
+```
+
+<ResponseField name="enabled" type="Bool">
+  True if enabled
+</ResponseField>
+
+### updateDisappearingMessageSettings()
+
+Update disappearing message settings.
+
+```swift
+public func updateDisappearingMessageSettings(
+    _ disappearingMessageSettings: DisappearingMessageSettings?
+) async throws
+```
+
+<ParamField path="disappearingMessageSettings" type="DisappearingMessageSettings" optional>
+  New settings, or nil to disable
+</ParamField>
+
+### clearDisappearingMessageSettings()
+
+Disable disappearing messages.
+
+```swift
+public func clearDisappearingMessageSettings() async throws
+```
+
+## Synchronization
+
+### sync()
+
+Sync the conversation with the network.
+
+```swift
+public func sync() async throws
+```
+
+```swift
+try await conversation.sync()
+```
+
+### processMessage()
+
+Process a streamed message envelope.
+
+```swift
+public func processMessage(
+    messageBytes: Data
+) async throws -> DecodedMessage?
+```
+
+<ParamField path="messageBytes" type="Data" required>
+  The message envelope bytes
+</ParamField>
+
+<ResponseField name="message" type="DecodedMessage?">
+  The decoded message if successful
+</ResponseField>
+
+## Status and Info
+
+### isActive()
+
+Check if the conversation is active.
+
+```swift
+public func isActive() throws -> Bool
+```
+
+<ResponseField name="isActive" type="Bool">
+  True if active
+</ResponseField>
+
+### isCreator()
+
+Check if the current user created the conversation.
+
+```swift
+public func isCreator() async throws -> Bool
+```
+
+<ResponseField name="isCreator" type="Bool">
+  True if the current user is the creator
+</ResponseField>
+
+### pausedForVersion()
+
+Check if the conversation is paused due to version incompatibility.
+
+```swift
+public func pausedForVersion() async throws -> String?
+```
+
+<ResponseField name="version" type="String?">
+  Minimum version required to unpause, or nil if not paused
+</ResponseField>
+
+### commitLogForkStatus()
+
+Get the commit log fork status.
+
+```swift
+public func commitLogForkStatus() -> CommitLogForkStatus
+```
+
+<ResponseField name="status" type="CommitLogForkStatus">
+  Fork status (.forked, .notForked, or .unknown)
+</ResponseField>
+
+### getDebugInformation()
+
+Get debug information.
+
+```swift
+public func getDebugInformation() async throws -> ConversationDebugInfo
+```
+
+<ResponseField name="debugInfo" type="ConversationDebugInfo">
+  Debug information
+</ResponseField>
+
+### getLastReadTimes()
+
+Get last read times for all members.
+
+```swift
+public func getLastReadTimes() throws -> [String: Int64]
+```
+
+<ResponseField name="readTimes" type="[String: Int64]">
+  Dictionary mapping inbox IDs to timestamps
+</ResponseField>
+
+## Push Notifications
+
+### getHmacKeys()
+
+Get HMAC keys for push notifications.
+
+```swift
+public func getHmacKeys() throws -> Xmtp_KeystoreApi_V1_GetConversationHmacKeysResponse
+```
+
+<ResponseField name="hmacKeys" type="Xmtp_KeystoreApi_V1_GetConversationHmacKeysResponse">
+  HMAC keys for this conversation
+</ResponseField>
+
+### getPushTopics()
+
+Get push notification topics.
+
+```swift
+public func getPushTopics() async throws -> [String]
+```
+
+<ResponseField name="topics" type="[String]">
+  Array of push topics
+</ResponseField>
+
+## Example Usage
+
+```swift
+// Get a conversation (could be group or DM)
+let conversation = try await client.conversations.list().first!
+
+// Send a message (works for both groups and DMs)
+try await conversation.send(content: "Hello!")
+
+// Get messages
+let messages = try await conversation.enrichedMessages(limit: 50)
+
+// Stream new messages
+for try await message in conversation.streamMessages() {
+    print("New: \(message.content())")
+}
+
+// Check the type if needed
+switch conversation.type {
+case .group:
+    print("This is a group conversation")
+case .dm:
+    print("This is a direct message")
+}
+```

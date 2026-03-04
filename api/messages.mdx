@@ -1,0 +1,455 @@
+---
+title: Messages API
+description: Send, retrieve, and stream messages in groups and DMs
+---
+
+The Messages API provides methods for sending, retrieving, and streaming messages in both `Group` and `Dm` conversations. Both conversation types share the same message-related methods.
+
+## Core Methods
+
+### send()
+
+Send a message to a conversation.
+
+```swift
+public func send<T>(
+  content: T,
+  options: SendOptions? = nil
+) async throws -> String
+```
+
+<ParamField path="content" type="T" required>
+  The content to send. Can be any type supported by registered codecs (String, Attachment, Reaction, etc.)
+</ParamField>
+
+<ParamField path="options" type="SendOptions?">
+  Optional send options including:
+  - `contentType`: ContentTypeID for custom content types
+  - `compression`: Compression algorithm (deflate or gzip)
+  - `ephemeral`: Whether the message is ephemeral
+</ParamField>
+
+<ResponseField name="return" type="String">
+  The hex-encoded message ID
+</ResponseField>
+
+#### Examples
+
+```swift
+// Send a text message
+let messageId = try await group.send(content: "Hello, world!")
+
+// Send with custom content type
+let reaction = Reaction(
+  reference: messageId,
+  action: .added,
+  content: "👍",
+  schema: .unicode
+)
+try await group.send(
+  content: reaction,
+  options: .init(contentType: ContentTypeReaction)
+)
+
+// Send an attachment
+let attachment = Attachment(
+  filename: "photo.jpg",
+  mimeType: "image/jpeg",
+  data: imageData
+)
+try await group.send(
+  content: attachment,
+  options: .init(contentType: ContentTypeAttachment)
+)
+```
+
+### messages()
+
+Get the raw list of messages from a conversation.
+
+```swift
+public func messages(
+  beforeNs: Int64? = nil,
+  afterNs: Int64? = nil,
+  limit: Int? = nil,
+  direction: SortDirection? = .descending,
+  deliveryStatus: MessageDeliveryStatus = .all,
+  excludeContentTypes: [StandardContentType]? = nil,
+  excludeSenderInboxIds: [String]? = nil,
+  sortBy: MessageSortBy? = nil,
+  insertedAfterNs: Int64? = nil,
+  insertedBeforeNs: Int64? = nil
+) async throws -> [DecodedMessage]
+```
+
+<Note>
+  This method returns all messages in chronological order without additional processing. Reactions, replies, and other associated metadata are returned as separate messages and are not linked to their parent messages.
+
+  For UI rendering, consider using `enrichedMessages()` instead, which provides messages with enriched metadata automatically included.
+</Note>
+
+<ParamField path="beforeNs" type="Int64?">
+  Filter messages sent before this timestamp (in nanoseconds)
+</ParamField>
+
+<ParamField path="afterNs" type="Int64?">
+  Filter messages sent after this timestamp (in nanoseconds)
+</ParamField>
+
+<ParamField path="limit" type="Int?">
+  Maximum number of messages to return
+</ParamField>
+
+<ParamField path="direction" type="SortDirection?">
+  Sort direction: `.ascending` or `.descending` (default)
+</ParamField>
+
+<ParamField path="deliveryStatus" type="MessageDeliveryStatus">
+  Filter by delivery status:
+  - `.all` - All messages (default)
+  - `.published` - Only published messages
+  - `.unpublished` - Only unpublished messages
+  - `.failed` - Only failed messages
+</ParamField>
+
+<ParamField path="excludeContentTypes" type="[StandardContentType]?">
+  Content types to exclude from results
+</ParamField>
+
+<ParamField path="excludeSenderInboxIds" type="[String]?">
+  Sender inbox IDs to exclude from results
+</ParamField>
+
+<ParamField path="sortBy" type="MessageSortBy?">
+  Sort by:
+  - `.sentAt` - Sort by sent timestamp
+  - `.insertedAt` - Sort by insertion timestamp
+</ParamField>
+
+<ParamField path="insertedAfterNs" type="Int64?">
+  Filter messages inserted after this timestamp (in nanoseconds)
+</ParamField>
+
+<ParamField path="insertedBeforeNs" type="Int64?">
+  Filter messages inserted before this timestamp (in nanoseconds)
+</ParamField>
+
+<ResponseField name="return" type="[DecodedMessage]">
+  Array of decoded messages
+</ResponseField>
+
+#### Examples
+
+```swift
+// Get all messages
+let messages = try await group.messages()
+
+// Get last 10 messages
+let recentMessages = try await group.messages(limit: 10)
+
+// Get messages in ascending order
+let oldestFirst = try await group.messages(direction: .ascending)
+
+// Get only published messages
+let published = try await group.messages(deliveryStatus: .published)
+
+// Get messages sent after a specific time
+let timestampNs = Date().timeIntervalSince1970 * 1_000_000_000
+let newMessages = try await group.messages(afterNs: Int64(timestampNs))
+
+// Exclude reactions and read receipts
+let textMessages = try await group.messages(
+  excludeContentTypes: [.reaction, .readReceipt]
+)
+```
+
+### enrichedMessages()
+
+Get messages with enriched metadata automatically included.
+
+```swift
+public func enrichedMessages(
+  beforeNs: Int64? = nil,
+  afterNs: Int64? = nil,
+  limit: Int? = nil,
+  direction: SortDirection? = .descending,
+  deliveryStatus: MessageDeliveryStatus = .all,
+  excludeContentTypes: [StandardContentType]? = nil,
+  excludeSenderInboxIds: [String]? = nil,
+  sortBy: MessageSortBy? = nil,
+  insertedAfterNs: Int64? = nil,
+  insertedBeforeNs: Int64? = nil
+) async throws -> [DecodedMessageV2]
+```
+
+<Note>
+  **Recommended for UI rendering.** This method retrieves messages with reactions, replies, and other associated data "baked in" to each message, eliminating the need for separate queries to fetch this information.
+
+  This method provides better performance and simpler code compared to `messages()` when displaying conversations.
+</Note>
+
+Accepts the same parameters as `messages()`.
+
+<ResponseField name="return" type="[DecodedMessageV2]">
+  Array of enriched decoded messages with reactions and metadata included
+</ResponseField>
+
+#### Examples
+
+```swift
+// Get enriched messages
+let messages = try await group.enrichedMessages()
+
+// Access reactions on a message
+for message in messages {
+  if let reactions = message.reactions {
+    for reaction in reactions {
+      let content: Reaction = try reaction.content()
+      print("Reaction: \(content.content)")
+    }
+  }
+}
+
+// Filter and access content
+let textMessages = messages.filter { $0.contentTypeId.typeID == "text" }
+for message in textMessages {
+  let text: String = try message.content()
+  print("Message: \(text)")
+}
+```
+
+### streamMessages()
+
+Stream new messages in real-time as they arrive.
+
+```swift
+public func streamMessages(
+  onClose: (() -> Void)? = nil
+) -> AsyncThrowingStream<DecodedMessage, Error>
+```
+
+<ParamField path="onClose" type="(() -> Void)?">
+  Optional callback invoked when the stream closes
+</ParamField>
+
+<ResponseField name="return" type="AsyncThrowingStream<DecodedMessage, Error>">
+  An async stream that yields new messages as they arrive
+</ResponseField>
+
+#### Examples
+
+```swift
+// Stream messages in a Task
+Task {
+  for try await message in group.streamMessages() {
+    let text: String = try message.content()
+    print("New message: \(text)")
+  }
+}
+
+// Stream with close callback
+for try await message in dm.streamMessages(onClose: {
+  print("Stream closed")
+}) {
+  print("Message from: \(message.senderInboxId)")
+}
+
+// Handle different content types
+for try await message in group.streamMessages() {
+  let contentType = try message.encodedContent.type
+  
+  switch contentType.typeID {
+  case "text":
+    let text: String = try message.content()
+    print("Text: \(text)")
+  case "reaction":
+    let reaction: Reaction = try message.content()
+    print("Reaction: \(reaction.content)")
+  case "attachment":
+    let attachment: Attachment = try message.content()
+    print("Attachment: \(attachment.filename)")
+  default:
+    print("Unknown content type")
+  }
+}
+```
+
+### endStream()
+
+End an active message stream.
+
+```swift
+public func endStream()
+```
+
+#### Example
+
+```swift
+let streamTask = Task {
+  for try await message in group.streamMessages() {
+    print("Message: \(message.id)")
+  }
+}
+
+// Later, end the stream
+group.endStream()
+streamTask.cancel()
+```
+
+## Additional Message Methods
+
+### lastMessage()
+
+Get the most recent message in the conversation.
+
+```swift
+public func lastMessage() async throws -> DecodedMessage?
+```
+
+<ResponseField name="return" type="DecodedMessage?">
+  The most recent message, or nil if no messages exist
+</ResponseField>
+
+#### Example
+
+```swift
+if let lastMessage = try await group.lastMessage() {
+  print("Last message: \(try lastMessage.body)")
+}
+```
+
+### countMessages()
+
+Count messages in the conversation with optional filters.
+
+```swift
+public func countMessages(
+  beforeNs: Int64? = nil,
+  afterNs: Int64? = nil,
+  deliveryStatus: MessageDeliveryStatus = .all,
+  excludeContentTypes: [StandardContentType]? = nil,
+  excludeSenderInboxIds: [String]? = nil,
+  insertedAfterNs: Int64? = nil,
+  insertedBeforeNs: Int64? = nil
+) throws -> Int64
+```
+
+<ResponseField name="return" type="Int64">
+  The number of messages matching the filters
+</ResponseField>
+
+#### Example
+
+```swift
+// Count all messages
+let totalCount = try group.countMessages()
+
+// Count unread messages (published after last read time)
+let unreadCount = try group.countMessages(
+  afterNs: lastReadTimestamp,
+  deliveryStatus: .published
+)
+```
+
+### deleteMessage()
+
+Delete a message by its ID.
+
+```swift
+public func deleteMessage(
+  messageId: String
+) async throws -> String
+```
+
+<ParamField path="messageId" type="String" required>
+  The hex-encoded message ID to delete
+</ParamField>
+
+<ResponseField name="return" type="String">
+  The hex-encoded ID of the deletion message
+</ResponseField>
+
+<Warning>
+  This method throws an error if the deletion fails (e.g., unauthorized deletion).
+</Warning>
+
+#### Example
+
+```swift
+let messageId = try await group.send(content: "This will be deleted")
+try await group.deleteMessage(messageId: messageId)
+```
+
+## Message Publishing
+
+### prepareMessage()
+
+Prepare a message for sending without immediately publishing it.
+
+```swift
+public func prepareMessage<T>(
+  content: T,
+  options: SendOptions? = nil,
+  noSend: Bool = false
+) async throws -> String
+```
+
+<ParamField path="content" type="T" required>
+  The content to prepare
+</ParamField>
+
+<ParamField path="options" type="SendOptions?">
+  Optional send options
+</ParamField>
+
+<ParamField path="noSend" type="Bool">
+  If true, only prepare without optimistic send. Default is false.
+</ParamField>
+
+<ResponseField name="return" type="String">
+  The hex-encoded message ID
+</ResponseField>
+
+### publishMessage()
+
+Publish a previously prepared message.
+
+```swift
+public func publishMessage(
+  messageId: String
+) async throws
+```
+
+<ParamField path="messageId" type="String" required>
+  The hex-encoded message ID to publish
+</ParamField>
+
+### publishMessages()
+
+Publish all prepared messages in the conversation.
+
+```swift
+public func publishMessages() async throws
+```
+
+#### Example
+
+```swift
+// Prepare multiple messages
+let id1 = try await group.prepareMessage(content: "First")
+let id2 = try await group.prepareMessage(content: "Second")
+let id3 = try await group.prepareMessage(content: "Third")
+
+// Publish all at once
+try await group.publishMessages()
+
+// Or publish individually
+try await group.publishMessage(messageId: id1)
+```
+
+## See Also
+
+- [DecodedMessage API](/api/decoded-message) - Message object structure and properties
+- [Content Types](/api/codecs/text) - Available content types and codecs
+- [Group API](/api/group) - Group-specific methods
+- [DM API](/api/dm) - Direct message-specific methods

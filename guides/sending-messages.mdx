@@ -1,0 +1,673 @@
+---
+title: Sending Messages
+description: Learn how to send text messages, attachments, and custom content types
+---
+
+The XMTP iOS SDK provides flexible methods for sending messages with various content types, delivery options, and error handling strategies.
+
+## Basic Text Messages
+
+### Send Simple Text
+
+The easiest way to send a message:
+
+```swift Conversation.swift:260-269
+let conversation = try await client.conversations.list().first!
+
+let messageId = try await conversation.send(text: "Hello, XMTP!")
+print("Message sent with ID: \(messageId)")
+```
+
+### Send with Generic Content
+
+Use the generic `send()` method for any content type:
+
+```swift Conversation.swift:234-243
+let messageId = try await conversation.send(
+    content: "Hello, World!"
+)
+```
+
+## Sending with Options
+
+### Using SendOptions
+
+Configure how your message is sent:
+
+```swift SendOptions.swift:10-22
+let options = SendOptions(
+    compression: .gzip,  // Optional compression
+    contentType: ContentTypeText,  // Explicit content type
+    ephemeral: false  // Whether message is ephemeral
+)
+
+let messageId = try await conversation.send(
+    content: "Compressed message",
+    options: options
+)
+```
+
+### Content Compression
+
+Compress large messages to reduce network usage:
+
+```swift SendOptions.swift:11
+// Available compression options
+let options = SendOptions(compression: .gzip)
+
+// Send compressed message
+try await conversation.send(
+    content: longMessage,
+    options: options
+)
+```
+
+## Sending Different Content Types
+
+### Text Messages
+
+```swift TextCodec.swift:16-52
+// Register the codec (usually done once)
+Client.register(codec: TextCodec())
+
+// Send text
+let messageId = try await conversation.send(
+    content: "Hello!",
+    options: SendOptions(contentType: ContentTypeText)
+)
+```
+
+### Attachments
+
+Send files, images, and other media:
+
+```swift AttachmentCodec.swift:20-70
+// Register the codec
+Client.register(codec: AttachmentCodec())
+
+// Prepare attachment
+let attachment = Attachment(
+    filename: "photo.jpg",
+    mimeType: "image/jpeg",
+    data: imageData
+)
+
+// Send attachment
+let messageId = try await conversation.send(
+    content: attachment,
+    options: SendOptions(contentType: ContentTypeAttachment)
+)
+```
+
+### Remote Attachments
+
+For large files, upload to external storage first:
+
+<Steps>
+
+<Step title="Encrypt the attachment">
+
+```swift RemoteAttachmentCodec.swift:106-121
+let attachment = Attachment(
+    filename: "large-file.mp4",
+    mimeType: "video/mp4",
+    data: videoData
+)
+
+let encrypted = try RemoteAttachment.encodeEncrypted(
+    content: attachment,
+    codec: AttachmentCodec()
+)
+```
+
+</Step>
+
+<Step title="Upload to your server">
+
+```swift
+// Upload the encrypted payload to your storage
+let uploadURL = try await uploadToStorage(
+    data: encrypted.payload,
+    filename: attachment.filename
+)
+```
+
+</Step>
+
+<Step title="Send the remote attachment">
+
+```swift RemoteAttachmentCodec.swift:48-98
+Client.register(codec: RemoteAttachmentCodec())
+
+let remoteAttachment = try RemoteAttachment(
+    url: uploadURL,
+    encryptedEncodedContent: encrypted
+)
+
+let messageId = try await conversation.send(
+    content: remoteAttachment,
+    options: SendOptions(contentType: ContentTypeRemoteAttachment)
+)
+```
+
+</Step>
+
+</Steps>
+
+### Reactions
+
+React to existing messages:
+
+```swift ReactionCodec.swift:17-118
+Client.register(codec: ReactionCodec())
+
+let reaction = Reaction(
+    reference: originalMessageId,
+    action: .added,  // or .removed
+    content: "👍",
+    schema: .unicode,  // or .shortcode, .custom
+    referenceInboxId: senderInboxId
+)
+
+let messageId = try await conversation.send(
+    content: reaction,
+    options: SendOptions(contentType: ContentTypeReaction)
+)
+```
+
+### Replies
+
+Reply to specific messages:
+
+```swift ReplyCodec.swift:12-82
+Client.register(codec: ReplyCodec())
+
+let reply = Reply(
+    reference: originalMessageId,
+    content: "Thanks for the message!",
+    contentType: ContentTypeText
+)
+
+let messageId = try await conversation.send(
+    content: reply,
+    options: SendOptions(contentType: ContentTypeReply)
+)
+```
+
+### Read Receipts
+
+Notify others you've read their messages:
+
+```swift ReadReceiptCodec.swift:17-48
+Client.register(codec: ReadReceiptCodec())
+
+let receipt = ReadReceipt()
+
+let messageId = try await conversation.send(
+    content: receipt,
+    options: SendOptions(contentType: ContentTypeReadReceipt)
+)
+```
+
+## Advanced Sending Patterns
+
+### Prepare and Publish Pattern
+
+For better control over message sending:
+
+<Steps>
+
+<Step title="Prepare the message">
+
+Prepare without sending to the network:
+
+```swift Group.swift:440-462
+let preparedId = try await conversation.prepareMessage(
+    content: "Hello!",
+    options: nil,
+    noSend: false  // false = store and send optimistically
+)
+
+print("Message prepared with ID: \(preparedId)")
+```
+
+</Step>
+
+<Step title="Publish when ready">
+
+```swift Group.swift:477-483
+// Publish a specific prepared message
+try await conversation.publishMessage(messageId: preparedId)
+
+// Or publish all prepared messages
+try await conversation.publishMessages()
+```
+
+</Step>
+
+</Steps>
+
+### Optimistic Sending
+
+Send messages that are stored locally and published asynchronously:
+
+```swift Group.swift:440-462
+// Prepare with optimistic sending
+let messageId = try await conversation.prepareMessage(
+    content: "Sending optimistically",
+    noSend: false  // Will send in background
+)
+
+// Message is stored locally immediately
+// Network publish happens asynchronously
+```
+
+### Send with Encoded Content
+
+For advanced use cases, send pre-encoded content:
+
+```swift Conversation.swift:245-258
+let codec = TextCodec()
+let encoded = try codec.encode(content: "Custom encoding")
+
+let messageId = try await conversation.send(
+    encodedContent: encoded,
+    visibilityOptions: MessageVisibilityOptions(shouldPush: true)
+)
+```
+
+## Message Visibility Options
+
+Control push notification behavior:
+
+```swift Group.swift:433-437
+let visibilityOptions = MessageVisibilityOptions(
+    shouldPush: true  // Send push notification
+)
+
+let messageId = try await conversation.send(
+    encodedContent: encodedContent,
+    visibilityOptions: visibilityOptions
+)
+```
+
+## Group-Specific Sending
+
+### Send to Groups
+
+```swift Group.swift:364-386
+let group = try await client.conversations.listGroups().first!
+
+let messageId = try await group.send(
+    content: "Hello, group!",
+    options: nil
+)
+```
+
+### Prepare Group Messages
+
+```swift Group.swift:440-475
+let group = try await client.conversations.listGroups().first!
+
+// Prepare without sending
+let messageId = try group.prepareMessage(
+    content: "Prepared message",
+    options: nil,
+    noSend: true
+)
+
+// Send later
+try await group.publishMessage(messageId: messageId)
+```
+
+## DM-Specific Sending
+
+### Send to Direct Messages
+
+```swift Dm.swift:153-171
+let dm = try await client.conversations.listDms().first!
+
+let messageId = try await dm.send(
+    content: "Private message",
+    options: nil
+)
+```
+
+### Prepare DM Messages
+
+```swift Dm.swift:225-260
+let dm = try await client.conversations.listDms().first!
+
+let messageId = try await dm.prepareMessage(
+    content: "Prepared DM",
+    options: nil,
+    noSend: true
+)
+
+try await dm.publishMessages()
+```
+
+## Error Handling
+
+Handle common sending errors:
+
+```swift
+do {
+    let messageId = try await conversation.send(
+        content: "Hello!"
+    )
+    print("Message sent: \(messageId)")
+    
+} catch CodecError.invalidContent {
+    print("Invalid message content")
+    
+} catch CodecError.codecNotFound {
+    print("Content codec not registered")
+    
+} catch {
+    print("Failed to send message: \(error)")
+}
+```
+
+## Working with Message IDs
+
+Message IDs are returned as hex strings:
+
+```swift
+let messageId = try await conversation.send(text: "Hello")
+
+// Store for later reference
+UserDefaults.standard.set(messageId, forKey: "lastMessageId")
+
+// Find message by ID later
+if let message = try client.conversations.findMessage(messageId: messageId) {
+    print("Found message: \(message.content())")
+}
+```
+
+## Sending in Batch
+
+### Prepare Multiple Messages
+
+```swift
+var messageIds: [String] = []
+
+// Prepare multiple messages
+for message in messagesToSend {
+    let id = try await conversation.prepareMessage(
+        content: message,
+        noSend: true
+    )
+    messageIds.append(id)
+}
+
+// Publish all at once
+try await conversation.publishMessages()
+```
+
+## Content Type Registration
+
+### Register Codecs
+
+Always register codecs before use:
+
+```swift Client.swift:200-202
+// Register globally (recommended)
+Client.register(codec: TextCodec())
+Client.register(codec: AttachmentCodec())
+Client.register(codec: ReactionCodec())
+Client.register(codec: ReplyCodec())
+Client.register(codec: ReadReceiptCodec())
+Client.register(codec: RemoteAttachmentCodec())
+```
+
+Or register during client creation:
+
+```swift Client.swift:103-104
+let options = ClientOptions(
+    api: .init(env: .production),
+    codecs: [
+        TextCodec(),
+        AttachmentCodec(),
+        ReactionCodec(),
+        ReplyCodec(),
+        ReadReceiptCodec(),
+        RemoteAttachmentCodec()
+    ],
+    dbEncryptionKey: encryptionKey
+)
+```
+
+## Fallback Messages
+
+Provide fallback text for unsupported content types:
+
+```swift AttachmentCodec.swift:62-64
+// Codecs automatically provide fallbacks
+// For attachments: "Can't display "{filename}". This app doesn't support attachments."
+
+// For reactions:
+// Added: "Reacted "{emoji}" to an earlier message"
+// Removed: "Removed "{emoji}" from an earlier message"
+```
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Always handle send errors">
+    Network issues can cause send failures. Always wrap sends in try-catch:
+    
+    ```swift
+    do {
+        let id = try await conversation.send(content: message)
+        await updateUI(messageId: id, status: .sent)
+    } catch {
+        await updateUI(status: .failed, error: error)
+        // Optionally retry
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="Use compression for large messages">
+    Enable compression for messages over a few KB:
+    
+    ```swift
+    let options = SendOptions(
+        compression: message.count > 5000 ? .gzip : nil
+    )
+    try await conversation.send(content: message, options: options)
+    ```
+  </Accordion>
+
+  <Accordion title="Store message IDs locally">
+    Save message IDs for tracking delivery status:
+    
+    ```swift
+    let messageId = try await conversation.send(content: text)
+    
+    // Store in database
+    database.save(messageId: messageId, status: .sending)
+    
+    // Update after confirmation
+    database.update(messageId: messageId, status: .sent)
+    ```
+  </Accordion>
+
+  <Accordion title="Use prepare/publish for offline support">
+    Prepare messages while offline, publish when connected:
+    
+    ```swift
+    // User composes message (may be offline)
+    let messageId = try await conversation.prepareMessage(
+        content: message,
+        noSend: true
+    )
+    
+    // Store locally
+    database.save(messageId: messageId, status: .pending)
+    
+    // Later, when online
+    if isOnline {
+        let pendingIds = database.getPendingMessageIds()
+        for id in pendingIds {
+            try await conversation.publishMessage(messageId: id)
+        }
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="Upload large files externally">
+    For files over 1MB, use RemoteAttachment:
+    
+    ```swift
+    if fileSize > 1_000_000 {
+        // Use remote attachment
+        let encrypted = try RemoteAttachment.encodeEncrypted(
+            content: attachment,
+            codec: AttachmentCodec()
+        )
+        let url = try await uploadToStorage(encrypted.payload)
+        let remote = try RemoteAttachment(url: url, encryptedEncodedContent: encrypted)
+        try await conversation.send(content: remote)
+    } else {
+        // Use direct attachment
+        try await conversation.send(content: attachment)
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="Batch message preparation">
+    When sending multiple messages, prepare them first:
+    
+    ```swift
+    // Prepare all messages
+    for message in messages {
+        try await conversation.prepareMessage(
+            content: message,
+            noSend: true
+        )
+    }
+    
+    // Publish all at once (more efficient)
+    try await conversation.publishMessages()
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Examples
+
+### Send Message with Retry
+
+```swift
+func sendWithRetry(
+    conversation: Conversation,
+    content: String,
+    maxRetries: Int = 3
+) async throws -> String {
+    var lastError: Error?
+    
+    for attempt in 1...maxRetries {
+        do {
+            let messageId = try await conversation.send(content: content)
+            print("Message sent on attempt \(attempt)")
+            return messageId
+        } catch {
+            lastError = error
+            print("Attempt \(attempt) failed: \(error)")
+            
+            if attempt < maxRetries {
+                // Wait before retry with exponential backoff
+                try await Task.sleep(nanoseconds: UInt64(pow(2.0, Double(attempt))) * 1_000_000_000)
+            }
+        }
+    }
+    
+    throw lastError!
+}
+
+// Usage
+let messageId = try await sendWithRetry(
+    conversation: conversation,
+    content: "Important message"
+)
+```
+
+### Send with Progress Tracking
+
+```swift
+func sendLargeAttachment(
+    conversation: Conversation,
+    attachment: Attachment,
+    progressHandler: @escaping (Double) -> Void
+) async throws -> String {
+    // 1. Encrypt (20% progress)
+    progressHandler(0.2)
+    let encrypted = try RemoteAttachment.encodeEncrypted(
+        content: attachment,
+        codec: AttachmentCodec()
+    )
+    
+    // 2. Upload (20-80% progress)
+    progressHandler(0.4)
+    let url = try await uploadWithProgress(
+        data: encrypted.payload
+    ) { uploadProgress in
+        progressHandler(0.2 + (uploadProgress * 0.6))
+    }
+    
+    // 3. Send reference (80-100% progress)
+    progressHandler(0.9)
+    let remote = try RemoteAttachment(
+        url: url,
+        encryptedEncodedContent: encrypted
+    )
+    
+    let messageId = try await conversation.send(
+        content: remote,
+        options: SendOptions(contentType: ContentTypeRemoteAttachment)
+    )
+    
+    progressHandler(1.0)
+    return messageId
+}
+```
+
+### Send Rich Reply
+
+```swift
+func sendRichReply(
+    conversation: Conversation,
+    replyingTo message: DecodedMessage,
+    replyText: String
+) async throws -> String {
+    Client.register(codec: ReplyCodec())
+    
+    let reply = Reply(
+        reference: message.id,
+        content: replyText,
+        contentType: ContentTypeText
+    )
+    
+    return try await conversation.send(
+        content: reply,
+        options: SendOptions(contentType: ContentTypeReply)
+    )
+}
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Receiving Messages" icon="inbox" href="/guides/receiving-messages">
+    Learn how to fetch and stream messages
+  </Card>
+  <Card title="Content Types" icon="file-code" href="/guides/content-types">
+    Explore all available content types
+  </Card>
+  <Card title="Group Chat" icon="users" href="/guides/group-chat">
+    Group-specific features and operations
+  </Card>
+  <Card title="Direct Messages" icon="message" href="/guides/direct-messages">
+    Direct message functionality
+  </Card>
+</CardGroup>

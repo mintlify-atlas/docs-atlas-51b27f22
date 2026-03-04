@@ -1,0 +1,296 @@
+---
+title: XMTPEnvironment
+description: Network environment configuration for XMTP clients
+---
+
+`XMTPEnvironment` defines the available XMTP network environments that clients can connect to. It specifies the host addresses and connection settings for development, production, and local testing.
+
+## Enum cases
+
+```swift
+public enum XMTPEnvironment: String {
+    case dev = "grpc.dev.xmtp.network"
+    case production = "grpc.production.xmtp.network"
+    case local = "localhost"
+}
+```
+
+<ParamField path="dev" type="XMTPEnvironment">
+  **Development environment** for testing and development. Connects to `grpc.dev.xmtp.network:443`.
+  
+  - Host: `grpc.dev.xmtp.network`
+  - Port: `443`
+  - Secure: `true`
+  - History sync: `https://message-history.dev.ephemera.network`
+</ParamField>
+
+<ParamField path="production" type="XMTPEnvironment">
+  **Production environment** for live applications. Connects to `grpc.production.xmtp.network:443`.
+  
+  - Host: `grpc.production.xmtp.network`
+  - Port: `443`
+  - Secure: `true`
+  - History sync: `https://message-history.production.ephemera.network`
+</ParamField>
+
+<ParamField path="local" type="XMTPEnvironment">
+  **Local environment** for running a local XMTP node. Connects to `localhost:5556` by default.
+  
+  - Host: `localhost` (customizable)
+  - Port: `5556`
+  - Secure: `false`
+  - History sync: `http://localhost:5558` (customizable)
+</ParamField>
+
+## Properties
+
+### url
+
+Returns the full URL for the environment:
+
+```swift
+var url: String { get }
+```
+
+**Returns:**
+- `.dev`: `"https://grpc.dev.xmtp.network:443"`
+- `.production`: `"https://grpc.production.xmtp.network:443"`
+- `.local`: `"http://localhost:5556"` (or custom address)
+
+### isSecure
+
+Indicates whether the connection uses HTTPS:
+
+```swift
+var isSecure: Bool { get }
+```
+
+**Returns:**
+- `true` for `.dev` and `.production`
+- `false` for `.local` (unless custom address uses HTTPS)
+
+### getHistorySyncUrl()
+
+Returns the history sync server URL for the environment:
+
+```swift
+public func getHistorySyncUrl() -> String
+```
+
+**Returns:**
+- `.dev`: `"https://message-history.dev.ephemera.network"`
+- `.production`: `"https://message-history.production.ephemera.network"`
+- `.local`: `"http://localhost:5558"` (or custom URL)
+
+## Custom local configuration
+
+For the `.local` environment, you can override the default addresses:
+
+```swift
+public static var customLocalAddress: String?
+public static var customHistorySyncUrl: String?
+```
+
+### Environment variables
+
+You can also configure local addresses via environment variables:
+
+```swift
+public func getLocalAddressFromEnvironment() -> String?
+public func getHistorySyncUrlFromEnvironment() -> String?
+```
+
+Environment variables:
+- `XMTP_NODE_ADDRESS`: Custom local node address
+- `XMTP_HISTORY_SERVER_ADDRESS`: Custom history sync URL
+
+## Example usage
+
+### Production environment
+
+```swift
+import XMTP
+
+let options = ClientOptions(
+    api: ClientOptions.Api(
+        env: .production,
+        isSecure: true
+    ),
+    dbEncryptionKey: encryptionKey
+)
+
+let client = try await Client.create(
+    account: signingKey,
+    options: options
+)
+```
+
+### Development environment
+
+```swift
+let options = ClientOptions(
+    api: ClientOptions.Api(
+        env: .dev,
+        isSecure: true
+    ),
+    dbEncryptionKey: encryptionKey
+)
+
+let client = try await Client.create(
+    account: signingKey,
+    options: options
+)
+```
+
+### Local environment with defaults
+
+```swift
+let options = ClientOptions(
+    api: ClientOptions.Api(
+        env: .local,
+        isSecure: false  // Local typically doesn't use TLS
+    ),
+    dbEncryptionKey: encryptionKey
+)
+
+let client = try await Client.create(
+    account: signingKey,
+    options: options
+)
+```
+
+### Local environment with custom address
+
+```swift
+// Set custom local address
+XMTPEnvironment.customLocalAddress = "192.168.1.100:5556"
+XMTPEnvironment.customHistorySyncUrl = "http://192.168.1.100:5558"
+
+let options = ClientOptions(
+    api: ClientOptions.Api(
+        env: .local,
+        isSecure: false
+    ),
+    dbEncryptionKey: encryptionKey
+)
+```
+
+### Using environment variables
+
+```bash
+# Set environment variables before running your app
+export XMTP_NODE_ADDRESS="localhost:5556"
+export XMTP_HISTORY_SERVER_ADDRESS="http://localhost:5558"
+```
+
+```swift
+// The SDK will automatically use these environment variables
+let options = ClientOptions(
+    api: ClientOptions.Api(env: .local),
+    dbEncryptionKey: encryptionKey
+)
+```
+
+### Checking environment properties
+
+```swift
+let env = XMTPEnvironment.production
+
+print(env.url)                // "https://grpc.production.xmtp.network:443"
+print(env.isSecure)           // true
+print(env.getHistorySyncUrl()) // "https://message-history.production.ephemera.network"
+```
+
+## Environment comparison
+
+| Feature | Development | Production | Local |
+|---------|-------------|------------|-------|
+| **Host** | `grpc.dev.xmtp.network` | `grpc.production.xmtp.network` | `localhost` |
+| **Port** | `443` | `443` | `5556` |
+| **TLS** | Yes | Yes | No (default) |
+| **Use case** | Testing, development | Live apps | Local development |
+| **Data persistence** | Temporary | Permanent | Local only |
+| **History sync** | Dev server | Production server | Local server |
+
+## Best practices
+
+1. **Environment selection**:
+   - Use `.dev` during development and testing
+   - Use `.production` for released applications
+   - Use `.local` only for local development with a self-hosted node
+
+2. **Security settings**:
+   ```swift
+   let options = ClientOptions(
+       api: ClientOptions.Api(
+           env: .production,
+           isSecure: true  // Always true for production
+       ),
+       dbEncryptionKey: encryptionKey
+   )
+   ```
+
+3. **Development workflow**:
+   ```swift
+   #if DEBUG
+   let environment = XMTPEnvironment.dev
+   #else
+   let environment = XMTPEnvironment.production
+   #endif
+   
+   let options = ClientOptions(
+       api: ClientOptions.Api(env: environment),
+       dbEncryptionKey: encryptionKey
+   )
+   ```
+
+4. **Local testing**:
+   ```swift
+   // Start local node with Docker
+   // docker run -p 5556:5556 -p 5558:5558 xmtp/node-go
+   
+   let options = ClientOptions(
+       api: ClientOptions.Api(
+           env: .local,
+           isSecure: false
+       ),
+       dbEncryptionKey: encryptionKey,
+       historySyncUrl: "http://localhost:5558"
+   )
+   ```
+
+5. **Environment validation**:
+   ```swift
+   func validateEnvironment(_ env: XMTPEnvironment) {
+       switch env {
+       case .production:
+           assert(env.isSecure, "Production must use secure connection")
+       case .dev:
+           print("Using development environment")
+       case .local:
+           print("⚠️ Using local environment - not for production")
+       }
+   }
+   ```
+
+## Running a local node
+
+To use the `.local` environment, you need to run a local XMTP node:
+
+```bash
+# Using the provided script
+./script/local
+
+# Or with Docker
+docker run -p 5556:5556 -p 5558:5558 xmtp/node-go
+
+# Or with dev script
+./dev/up
+```
+
+See the [CLAUDE.md](https://github.com/xmtp/xmtp-ios/blob/main/CLAUDE.md) file in the repository for more details on local development setup.
+
+## Related APIs
+
+- [ClientOptions](/api/client-options) - Using environments in client configuration
+- [Client](/api/client) - Creating clients with specific environments

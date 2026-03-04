@@ -1,0 +1,455 @@
+---
+title: 'ReactionCodec'
+description: 'Codec for adding emoji reactions to messages'
+icon: 'face-smile'
+---
+
+## Overview
+
+The `ReactionCodec` enables users to add emoji reactions to messages. Reactions reference a previous message by ID and can be added or removed.
+
+<Info>
+Two versions exist: `ReactionCodec` (v1) and `ReactionV2Codec` (v2). Version 2 adds support for enriched messages with child message grouping.
+</Info>
+
+## Content Type IDs
+
+```swift
+// Version 1
+ContentTypeReaction = ContentTypeID(
+    authorityID: "xmtp.org",
+    typeID: "reaction",
+    versionMajor: 1,
+    versionMinor: 0
+)
+
+// Version 2
+ContentTypeReactionV2 = ContentTypeID(
+    authorityID: "xmtp.org",
+    typeID: "reaction",
+    versionMajor: 2,
+    versionMinor: 0
+)
+```
+
+## Structure
+
+### Reaction
+
+```swift
+public struct Reaction: Codable {
+    public var reference: String
+    public var referenceInboxId: String?
+    public var action: ReactionAction
+    public var content: String
+    public var schema: ReactionSchema
+}
+```
+
+#### Properties
+
+<ParamField path="reference" type="String" required>
+  ID of the message being reacted to
+</ParamField>
+
+<ParamField path="referenceInboxId" type="String?">
+  Inbox ID of the message sender (used in v2)
+</ParamField>
+
+<ParamField path="action" type="ReactionAction" required>
+  Whether the reaction is being added or removed
+</ParamField>
+
+<ParamField path="content" type="String" required>
+  The reaction content (emoji, shortcode, or custom identifier)
+</ParamField>
+
+<ParamField path="schema" type="ReactionSchema" required>
+  The format of the reaction content
+</ParamField>
+
+### ReactionAction
+
+```swift
+public enum ReactionAction: String, Codable {
+    case added
+    case removed
+    case unknown
+}
+```
+
+### ReactionSchema
+
+```swift
+public enum ReactionSchema: String, Codable {
+    case unicode    // Standard emoji (U+1F603)
+    case shortcode  // Text shortcode (:smile:)
+    case custom     // Custom reaction identifier
+    case unknown
+}
+```
+
+## Usage
+
+### Registering the Codec
+
+```swift
+import XMTPiOS
+
+// Register v1 codec
+Client.register(codec: ReactionCodec())
+
+// Or register v2 codec (recommended)
+Client.register(codec: ReactionV2Codec())
+
+// You can register both for compatibility
+Client.register(codec: ReactionCodec())
+Client.register(codec: ReactionV2Codec())
+```
+
+### Adding Reactions
+
+```swift
+// Get the message to react to
+let messages = try await conversation.messages()
+let messageToReact = messages.first!
+
+// Create a unicode emoji reaction
+let reaction = Reaction(
+    reference: messageToReact.id,
+    action: .added,
+    content: "U+1F603",  // 😃
+    schema: .unicode
+)
+
+// Send the reaction (v1)
+try await conversation.send(
+    content: reaction,
+    options: .init(contentType: ContentTypeReaction)
+)
+
+// Or send with v2
+try await conversation.send(
+    content: reaction,
+    options: .init(contentType: ContentTypeReactionV2)
+)
+```
+
+### Removing Reactions
+
+```swift
+let removeReaction = Reaction(
+    reference: messageToReact.id,
+    action: .removed,
+    content: "U+1F603",
+    schema: .unicode
+)
+
+try await conversation.send(
+    content: removeReaction,
+    options: .init(contentType: ContentTypeReaction)
+)
+```
+
+### Using Different Schemas
+
+```swift
+// Unicode emoji
+let unicodeReaction = Reaction(
+    reference: messageId,
+    action: .added,
+    content: "U+1F603",
+    schema: .unicode
+)
+
+// Shortcode
+let shortcodeReaction = Reaction(
+    reference: messageId,
+    action: .added,
+    content: ":smile:",
+    schema: .shortcode
+)
+
+// Custom reaction
+let customReaction = Reaction(
+    reference: messageId,
+    action: .added,
+    content: "custom-reaction-id",
+    schema: .custom
+)
+```
+
+### Receiving Reactions (v2 with Enriched Messages)
+
+```swift
+// Get messages with their reactions grouped
+let enrichedMessages = try await conversation.messagesWithReactions()
+
+for message in enrichedMessages {
+    print("Message: \(message.id)")
+    
+    // Access child reactions
+    if let reactions = message.childMessages {
+        for reactionMessage in reactions {
+            let reaction: Reaction = try reactionMessage.content()
+            print("  Reaction: \(reaction.content) (\(reaction.action))")
+        }
+    }
+}
+```
+
+### Receiving Reactions (v1)
+
+```swift
+let messages = try await conversation.messages()
+
+for message in messages {
+    if message.contentTypeId == ContentTypeReaction.id {
+        let reaction: Reaction = try message.content()
+        
+        print("Reaction \(reaction.content) was \(reaction.action) to message \(reaction.reference)")
+    }
+}
+```
+
+## Implementation Details
+
+### ReactionCodec (v1)
+
+#### Encoding
+
+```swift
+public func encode(content: Reaction) throws -> EncodedContent {
+    var encodedContent = EncodedContent()
+    encodedContent.type = ContentTypeReaction
+    encodedContent.content = try JSONEncoder().encode(content)
+    return encodedContent
+}
+```
+
+#### Decoding
+
+Supports both canonical JSON format and legacy parameter format:
+
+```swift
+public func decode(content: EncodedContent) throws -> Reaction {
+    // Try canonical JSON format first
+    if let reaction = try? JSONDecoder().decode(Reaction.self, from: content.content) {
+        return reaction
+    }
+    
+    // Fall back to legacy parameter format
+    return Reaction(
+        reference: content.parameters["reference"] ?? "",
+        action: ReactionAction(rawValue: content.parameters["action"] ?? ""),
+        content: String(data: content.content, encoding: .utf8) ?? "",
+        schema: ReactionSchema(rawValue: content.parameters["schema"] ?? ""),
+        referenceInboxId: ""
+    )
+}
+```
+
+#### Fallback
+
+```swift
+public func fallback(content: Reaction) throws -> String? {
+    switch content.action {
+    case .added:
+        return "Reacted \"\(content.content)\" to an earlier message"
+    case .removed:
+        return "Removed \"\(content.content)\" from an earlier message"
+    case .unknown:
+        return nil
+    }
+}
+```
+
+#### Push Notifications
+
+```swift
+// v1: Reactions don't trigger push notifications
+public func shouldPush(content: Reaction) throws -> Bool {
+    false
+}
+
+// v2: Only 'added' reactions trigger push
+public func shouldPush(content: Reaction) throws -> Bool {
+    switch content.action {
+    case .added:
+        return true
+    default:
+        return false
+    }
+}
+```
+
+### ReactionV2Codec
+
+Version 2 uses FFI bindings to Rust for encoding/decoding:
+
+```swift
+public func encode(content: Reaction) throws -> EncodedContent {
+    let ffiReaction = FfiReactionPayload(
+        reference: content.reference,
+        referenceInboxId: content.referenceInboxId ?? "",
+        action: content.action.toFfiReactionAction(),
+        content: content.content,
+        schema: content.schema.toFfiReactionSchema()
+    )
+    return try EncodedContent(serializedBytes: encodeReaction(reaction: ffiReaction))
+}
+
+public func decode(content: EncodedContent) throws -> Reaction {
+    let ffiReaction = try decodeReaction(bytes: content.serializedBytes())
+    return Reaction(
+        reference: ffiReaction.reference,
+        action: ReactionAction.fromFfiReactionAction(ffiReaction.action),
+        content: ffiReaction.content,
+        schema: ReactionSchema.fromFfiReactionSchema(ffiReaction.schema),
+        referenceInboxId: ffiReaction.referenceInboxId
+    )
+}
+```
+
+## Common Patterns
+
+### Display Reaction Counts
+
+```swift
+func getReactionCounts(for messageId: String) async throws -> [String: Int] {
+    let messages = try await conversation.messages()
+    var counts: [String: Int] = [:]
+    
+    for message in messages {
+        if message.contentTypeId == ContentTypeReaction.id {
+            let reaction: Reaction = try message.content()
+            
+            if reaction.reference == messageId {
+                switch reaction.action {
+                case .added:
+                    counts[reaction.content, default: 0] += 1
+                case .removed:
+                    counts[reaction.content, default: 0] -= 1
+                case .unknown:
+                    break
+                }
+            }
+        }
+    }
+    
+    return counts.filter { $0.value > 0 }
+}
+```
+
+### Toggle Reaction
+
+```swift
+func toggleReaction(messageId: String, emoji: String) async throws {
+    // Check if user already reacted
+    let hasReacted = try await userHasReacted(messageId: messageId, emoji: emoji)
+    
+    let reaction = Reaction(
+        reference: messageId,
+        action: hasReacted ? .removed : .added,
+        content: emoji,
+        schema: .unicode
+    )
+    
+    try await conversation.send(
+        content: reaction,
+        options: .init(contentType: ContentTypeReaction)
+    )
+}
+```
+
+## Complete Example
+
+```swift
+import XMTPiOS
+
+class ReactionExample {
+    let conversation: Conversation
+    
+    func sendReaction() async throws {
+        // Register codec
+        Client.register(codec: ReactionCodec())
+        
+        // Get message to react to
+        let messages = try await conversation.messages()
+        guard let message = messages.first else { return }
+        
+        // Add thumbs up reaction
+        let reaction = Reaction(
+            reference: message.id,
+            action: .added,
+            content: "U+1F44D",  // 👍
+            schema: .unicode
+        )
+        
+        try await conversation.send(
+            content: reaction,
+            options: .init(contentType: ContentTypeReaction)
+        )
+    }
+    
+    func displayReactions() async throws {
+        let messages = try await conversation.messages()
+        
+        // Group reactions by message
+        var reactionsByMessage: [String: [Reaction]] = [:]
+        
+        for message in messages {
+            if message.contentTypeId == ContentTypeReaction.id {
+                let reaction: Reaction = try message.content()
+                reactionsByMessage[reaction.reference, default: []].append(reaction)
+            }
+        }
+        
+        // Display
+        for (messageId, reactions) in reactionsByMessage {
+            print("Message \(messageId):")
+            
+            var counts: [String: Int] = [:]
+            for reaction in reactions {
+                switch reaction.action {
+                case .added:
+                    counts[reaction.content, default: 0] += 1
+                case .removed:
+                    counts[reaction.content, default: 0] -= 1
+                case .unknown:
+                    break
+                }
+            }
+            
+            for (emoji, count) in counts where count > 0 {
+                print("  \(emoji): \(count)")
+            }
+        }
+    }
+}
+```
+
+## Version Comparison
+
+| Feature | v1 | v2 |
+|---------|----|----||
+| Basic reactions | ✅ | ✅ |
+| Enriched messages | ❌ | ✅ |
+| Push on add | ❌ | ✅ |
+| Inbox ID tracking | ❌ | ✅ |
+| Encoding | JSON | Protobuf (FFI) |
+
+<Tip>
+For new applications, use `ReactionV2Codec` for better performance and enriched message support.
+</Tip>
+
+## Related
+
+- [ReplyCodec](/api/codecs/reply) - For message threads
+- [ReadReceiptCodec](/api/codecs/read-receipt) - For read receipts
+- [ContentCodec Protocol](/api/content-codec) - Base protocol for all codecs
+
+## Source
+
+- [ReactionCodec.swift](https://github.com/xmtp/xmtp-ios/blob/main/Sources/XMTPiOS/Codecs/ReactionCodec.swift)
+- [ReactionV2Codec.swift](https://github.com/xmtp/xmtp-ios/blob/main/Sources/XMTPiOS/Codecs/ReactionV2Codec.swift)

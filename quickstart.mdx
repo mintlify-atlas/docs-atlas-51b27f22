@@ -1,80 +1,463 @@
 ---
-title: "Quickstart"
-description: "Start building awesome documentation in minutes"
+title: Quickstart
+description: Build your first XMTP messaging app for iOS in minutes
 ---
 
-## Get started in three steps
+This guide will walk you through creating a simple iOS messaging app using the XMTP SDK. You'll learn how to create a client, start conversations, send messages, and receive messages in real-time.
 
-Get your documentation site running locally and make your first customization.
+## Prerequisites
 
-### Step 1: Set up your local environment
+Before you begin, make sure you have:
 
-<AccordionGroup>
-  <Accordion icon="copy" title="Clone your docs locally">
-    During the onboarding process, you created a GitHub repository with your docs content if you didn't already have one. You can find a link to this repository in your [dashboard](https://dashboard.mintlify.com).
-    
-    To clone the repository locally so that you can make and preview changes to your docs, follow the [Cloning a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository) guide in the GitHub docs.
-  </Accordion>
-  <Accordion icon="rectangle-terminal" title="Start the preview server">
-    1. Install the Mintlify CLI: `npm i -g mint`
-    2. Navigate to your docs directory and run: `mint dev`
-    3. Open `http://localhost:3000` to see your docs live!
-    
-    <Tip>Your preview updates automatically as you edit files.</Tip>
-  </Accordion>
-</AccordionGroup>
+- Completed the [Installation](./installation) guide
+- Xcode 13.0 or later
+- iOS 14.0+ or macOS 11.0+ as your deployment target
+- Basic familiarity with Swift and SwiftUI or UIKit
 
-### Step 2: Deploy your changes
+## Overview
 
-<AccordionGroup>
-  <Accordion icon="github" title="Install our GitHub app">
-    Install the Mintlify GitHub app from your [dashboard](https://dashboard.mintlify.com/settings/organization/github-app).
-    
-    Our GitHub app automatically deploys your changes to your docs site, so you don't need to manage deployments yourself.
-</Accordion>
-<Accordion icon="palette" title="Update your site name and colors">
-    For a first change, let's update the name and colors of your docs site.
+In this quickstart, you'll:
 
-    1. Open `docs.json` in your editor.
-    2. Change the `"name"` field to your project name.
-    3. Update the `"colors"` to match your brand.
-    4. Save and see your changes instantly at `http://localhost:3000`.
+1. Create and configure an XMTP client
+2. Start a conversation with another user
+3. Send your first message
+4. Listen for incoming messages
 
-    <Tip>Try changing the primary color to see an immediate difference!</Tip>
-  </Accordion>
-</AccordionGroup>
+## Step 1: Create a Client
 
-### Step 3: Go live
+The `Client` is your entry point to the XMTP network. You'll need a signing key to create a client.
 
-<Accordion icon="rocket" title="Publish your docs">
-  1. Commit and push your changes.
-  2. Your docs will update and be live in moments!
-</Accordion>
+### Generate a Private Key
 
-## Next steps
+For testing, you can generate a random private key:
 
-Now that you have your docs running, explore these key features:
+```swift
+import XMTPiOS
 
-<CardGroup cols={2}>
+// Generate a random private key for testing
+let privateKey = try PrivateKey.generate()
+```
 
-<Card title="Write Content" icon="pen-to-square" href="/essentials/markdown">
-  Learn MDX syntax and start writing your documentation.
-</Card>
+<Warning>
+  Never use randomly generated keys in production. In a real app, integrate with the user's wallet (like MetaMask or WalletConnect) to obtain their signing key.
+</Warning>
 
-<Card title="Customize style" icon="palette" href="/essentials/settings">
-  Make your docs match your brand perfectly.
-</Card>
+### Configure Client Options
 
-<Card title="Add code examples" icon="square-code" href="/essentials/code">
-  Include syntax-highlighted code blocks.
-</Card>
+Create client options with a database encryption key:
 
-<Card title="API documentation" icon="code" href="/api-reference/introduction">
-  Auto-generate API docs from OpenAPI specs.
-</Card>
+```swift
+import CryptoKit
 
-</CardGroup>
+// Generate a secure database encryption key
+let encryptionKey = SymmetricKey(size: .bits256)
+let encryptionKeyData = encryptionKey.withUnsafeBytes { Data($0) }
+
+// Configure the client
+let clientOptions = ClientOptions(
+    api: ClientOptions.Api(
+        env: .dev,  // Use .production for production apps
+        isSecure: true
+    ),
+    dbEncryptionKey: encryptionKeyData
+)
+```
 
 <Note>
-  **Need help?** See our [full documentation](https://mintlify.com/docs) or join our [community](https://mintlify.com/community).
+  In production, store the encryption key securely in the Keychain. The same key must be used each time to access the message database.
 </Note>
+
+### Create the Client
+
+Now create the XMTP client:
+
+```swift
+let client = try await Client.create(
+    account: privateKey,
+    options: clientOptions
+)
+
+print("Client created!")
+print("Inbox ID: \(client.inboxID)")
+print("Installation ID: \(client.installationID)")
+```
+
+The `create` method:
+- Connects to the XMTP network
+- Registers your identity if needed
+- Creates a local encrypted database
+- Returns a ready-to-use client
+
+## Step 2: Start a Conversation
+
+XMTP supports two types of conversations: Direct Messages (DMs) and Groups.
+
+### Create a Direct Message
+
+To start a DM with another user, you need their inbox ID or wallet address:
+
+```swift
+// Using an inbox ID
+let peerInboxId = "0x1234..."  // Replace with actual inbox ID
+let dm = try await client.conversations.findOrCreateDm(
+    with: peerInboxId
+)
+
+print("DM created with ID: \(dm.id)")
+```
+
+<Note>
+  The `findOrCreateDm` method will return an existing DM if one already exists with this user, or create a new one if it doesn't.
+</Note>
+
+### Create a Group Conversation
+
+To create a group with multiple participants:
+
+```swift
+let group = try await client.conversations.newGroup(
+    with: [
+        "0x1234...",  // Inbox ID of first member
+        "0x5678..."   // Inbox ID of second member
+    ],
+    permissions: .allMembers,  // All members can add/remove others
+    name: "My First Group",
+    imageUrl: "https://example.com/group-image.png"
+)
+
+print("Group created: \(try group.name())")
+print("Group ID: \(group.id)")
+```
+
+### List Existing Conversations
+
+Retrieve all conversations:
+
+```swift
+// Sync with the network first
+try await client.conversations.sync()
+
+// List all conversations (DMs and groups)
+let conversations = try await client.conversations.list()
+print("You have \(conversations.count) conversations")
+
+for conversation in conversations {
+    switch conversation {
+    case .dm(let dm):
+        let peerInboxId = try dm.peerInboxId
+        print("DM with: \(peerInboxId)")
+    case .group(let group):
+        let groupName = try group.name()
+        print("Group: \(groupName)")
+    }
+}
+```
+
+## Step 3: Send a Message
+
+Sending messages is simple with the `send` method.
+
+### Send a Text Message
+
+```swift
+// Send to a DM
+let messageId = try await dm.send(content: "Hello from XMTP!")
+print("Message sent with ID: \(messageId)")
+
+// Send to a group
+let groupMessageId = try await group.send(content: "Hello everyone!")
+print("Group message sent with ID: \(groupMessageId)")
+```
+
+### Send with Custom Options
+
+You can customize message sending:
+
+```swift
+let options = SendOptions(
+    compression: .gzip  // Compress the message
+)
+
+let compressedMessageId = try await dm.send(
+    content: "This message is compressed",
+    options: options
+)
+```
+
+## Step 4: Receive Messages
+
+There are two ways to receive messages: fetching historical messages and streaming new ones in real-time.
+
+### Fetch Historical Messages
+
+Retrieve existing messages from a conversation:
+
+```swift
+// Get the last 50 messages
+let messages = try await dm.messages(
+    limit: 50,
+    direction: .descending  // Most recent first
+)
+
+for message in messages {
+    let senderInboxId = message.senderInboxId
+    let content = try message.content()
+    let timestamp = message.sentAt
+    
+    print("[\(timestamp)] \(senderInboxId): \(content)")
+}
+```
+
+### Stream New Messages
+
+Listen for new messages in real-time:
+
+```swift
+// Stream messages from a specific conversation
+Task {
+    for try await message in dm.streamMessages() {
+        let content = try message.content()
+        print("New message: \(content)")
+        
+        // Update your UI here
+    }
+}
+```
+
+### Stream All Messages
+
+Listen for messages across all conversations:
+
+```swift
+Task {
+    for try await message in client.conversations.streamAllMessages() {
+        let conversationId = message.conversationId
+        let content = try message.content()
+        print("Message in \(conversationId): \(content)")
+    }
+}
+```
+
+<Note>
+  Streams run indefinitely until canceled. Store the `Task` reference and call `task.cancel()` when you want to stop listening.
+</Note>
+
+## Complete Working Example
+
+Here's a complete example that ties everything together:
+
+```swift MessagingService.swift
+import Foundation
+import XMTPiOS
+import CryptoKit
+
+class MessagingService {
+    private var client: Client?
+    private var messageTask: Task<Void, Never>?
+    
+    // Initialize and create client
+    func initialize() async throws {
+        // Generate encryption key (store securely in production!)
+        let encryptionKey = SymmetricKey(size: .bits256)
+        let encryptionKeyData = encryptionKey.withUnsafeBytes { Data($0) }
+        
+        // Generate or load private key
+        let privateKey = try PrivateKey.generate()
+        
+        // Configure client
+        let options = ClientOptions(
+            api: ClientOptions.Api(env: .dev, isSecure: true),
+            dbEncryptionKey: encryptionKeyData
+        )
+        
+        // Create client
+        self.client = try await Client.create(
+            account: privateKey,
+            options: options
+        )
+        
+        print("✅ Client initialized")
+        print("📧 Inbox ID: \(client!.inboxID)")
+    }
+    
+    // Start a conversation
+    func startConversation(with inboxId: String) async throws -> Dm {
+        guard let client = client else {
+            throw NSError(domain: "Client not initialized", code: -1)
+        }
+        
+        let dm = try await client.conversations.findOrCreateDm(with: inboxId)
+        print("💬 Conversation started: \(dm.id)")
+        return dm
+    }
+    
+    // Send a message
+    func sendMessage(_ text: String, to conversation: Dm) async throws {
+        let messageId = try await conversation.send(content: text)
+        print("📤 Message sent: \(messageId)")
+    }
+    
+    // Listen for new messages
+    func startListening() {
+        guard let client = client else { return }
+        
+        messageTask = Task {
+            do {
+                for try await message in client.conversations.streamAllMessages() {
+                    await handleNewMessage(message)
+                }
+            } catch {
+                print("❌ Streaming error: \(error)")
+            }
+        }
+    }
+    
+    // Handle incoming messages
+    private func handleNewMessage(_ message: DecodedMessage) async {
+        do {
+            let content = try message.content()
+            print("📥 New message: \(content)")
+            
+            // Update your UI here
+            await MainActor.run {
+                // Update UI on main thread
+            }
+        } catch {
+            print("❌ Error handling message: \(error)")
+        }
+    }
+    
+    // Get conversation history
+    func getHistory(from conversation: Dm) async throws -> [DecodedMessage] {
+        let messages = try await conversation.messages(
+            limit: 50,
+            direction: .descending
+        )
+        print("📜 Retrieved \(messages.count) messages")
+        return messages
+    }
+    
+    // Clean up
+    func disconnect() {
+        messageTask?.cancel()
+        messageTask = nil
+        print("👋 Disconnected")
+    }
+}
+```
+
+### Using the MessagingService
+
+```swift
+// In your app:
+let service = MessagingService()
+
+// Initialize
+try await service.initialize()
+
+// Start a conversation
+let conversation = try await service.startConversation(
+    with: "0x1234..."  // Peer's inbox ID
+)
+
+// Send a message
+try await service.sendMessage("Hello!", to: conversation)
+
+// Get message history
+let history = try await service.getHistory(from: conversation)
+
+// Start listening for new messages
+service.startListening()
+
+// When done:
+service.disconnect()
+```
+
+## Key Concepts
+
+### Inbox ID vs Wallet Address
+
+- **Inbox ID**: Unique identifier for an XMTP identity (can have multiple wallet addresses)
+- **Wallet Address**: Ethereum address (one of potentially many addresses in an inbox)
+
+You can look up an inbox ID from a wallet address:
+
+```swift
+let publicIdentity = PublicIdentity(
+    kind: .ethereum,
+    identifier: "0xWalletAddress"
+)
+
+let inboxId = try await client.inboxIdFromIdentity(
+    identity: publicIdentity
+)
+```
+
+### Message Synchronization
+
+Always sync before listing conversations:
+
+```swift
+try await client.conversations.sync()
+let conversations = try await client.conversations.list()
+```
+
+### Error Handling
+
+Wrap XMTP operations in proper error handling:
+
+```swift
+do {
+    let dm = try await client.conversations.findOrCreateDm(with: inboxId)
+    try await dm.send(content: "Hello!")
+} catch {
+    print("Error: \(error.localizedDescription)")
+    // Handle error appropriately
+}
+```
+
+## Next Steps
+
+Now that you have a working messaging app, explore more features:
+
+<CardGroup cols={2}>
+  <Card title="Create Groups" icon="users" href="../conversations/groups">
+    Learn about group conversations and permissions
+  </Card>
+  <Card title="Send Attachments" icon="paperclip" href="../messages/attachments">
+    Send images and files in messages
+  </Card>
+  <Card title="Content Types" icon="code" href="../messages/content-types">
+    Work with reactions, replies, and custom content
+  </Card>
+  <Card title="Push Notifications" icon="bell" href="../advanced/push-notifications">
+    Set up push notifications for new messages
+  </Card>
+</CardGroup>
+
+## Troubleshooting
+
+### Client Creation Fails
+
+- Ensure you're using a valid environment (`.dev` or `.production`)
+- Check that the database encryption key is 32 bytes
+- Verify network connectivity
+
+### Messages Not Appearing
+
+- Call `sync()` before listing conversations or messages
+- Check that you're listening on the correct conversation
+- Verify both parties are using compatible SDK versions
+
+### Stream Not Receiving Messages
+
+- Ensure the stream task hasn't been canceled
+- Check that the conversation exists on both sides
+- Verify network connectivity
+
+## Additional Resources
+
+- [Client API Reference](https://xmtp.github.io/xmtp-ios/documentation/xmtpios/client)
+- [Conversations API Reference](https://xmtp.github.io/xmtp-ios/documentation/xmtpios/conversations)
+- [Example App Source Code](https://github.com/xmtp/xmtp-ios/tree/main/XMTPiOSExample)
+- [XMTP Community Forums](https://community.xmtp.org/)

@@ -1,0 +1,466 @@
+---
+title: Creating Custom Codecs
+description: Build custom content types to extend XMTP messaging capabilities
+---
+
+## Overview
+
+Custom codecs allow you to extend XMTP beyond the built-in content types. You can create codecs for any type of content your application needs - from location sharing to polls to custom multimedia formats.
+
+## The ContentCodec Protocol
+
+Every codec must implement the `ContentCodec` protocol defined in the SDK:
+
+```swift
+public protocol ContentCodec {
+  typealias ContentType = Sendable
+  
+  var contentType: ContentTypeID { get }
+  
+  func encode(content: ContentType, client: Client) throws -> EncodedContent
+  
+  func decode(content: EncodedContent, client: Client) throws -> ContentType
+  
+  func fallback(content: ContentType) -> String?
+  
+  func shouldPush(content: ContentType) -> Bool
+}
+```
+
+## Step-by-Step: Poll Codec Example
+
+Let's build a complete custom codec for creating polls in conversations.
+
+### Step 1: Define Your Content Type
+
+First, define the data structure for your content:
+
+```swift
+import Foundation
+
+// The poll data structure
+struct Poll: Codable, Sendable {
+  let question: String
+  let options: [String]
+  let allowMultipleVotes: Bool
+  let expiresAt: Date?
+  
+  init(
+    question: String,
+    options: [String],
+    allowMultipleVotes: Bool = false,
+    expiresAt: Date? = nil
+  ) {
+    self.question = question
+    self.options = options
+    self.allowMultipleVotes = allowMultipleVotes
+    self.expiresAt = expiresAt
+  }
+}
+```
+
+<Note>
+Make sure your content type conforms to `Codable` for easy serialization and `Sendable` for Swift concurrency safety.
+</Note>
+
+### Step 2: Define the Content Type ID
+
+Create a unique identifier for your content type:
+
+```swift
+import XMTPiOS
+
+let ContentTypePoll = ContentTypeID(
+  authorityID: "com.myapp",      // Your organization/app domain
+  typeID: "poll",                // Type identifier
+  versionMajor: 1,               // Major version
+  versionMinor: 0                // Minor version
+)
+```
+
+<Warning>
+Use a unique `authorityID` (like your reverse domain) to avoid conflicts with other developers' content types.
+</Warning>
+
+### Step 3: Implement the Codec
+
+```swift
+struct PollCodec: ContentCodec {
+  // 1. Declare the content type ID
+  var contentType: ContentTypeID {
+    ContentTypePoll
+  }
+  
+  // 2. Encode: Convert Poll to bytes
+  func encode(content: Poll, client: Client) throws -> EncodedContent {
+    let encoder = JSONEncoder()
+    encoder.dateEncodingStrategy = .iso8601
+    
+    let data = try encoder.encode(content)
+    
+    var encoded = EncodedContent()
+    encoded.type = contentType
+    encoded.content = data
+    
+    // Optional: Add parameters
+    encoded.parameters["question"] = content.question
+    
+    return encoded
+  }
+  
+  // 3. Decode: Convert bytes back to Poll
+  func decode(content: EncodedContent, client: Client) throws -> Poll {
+    let decoder = JSONDecoder()
+    decoder.dateDecodingStrategy = .iso8601
+    
+    return try decoder.decode(Poll.self, from: content.content)
+  }
+  
+  // 4. Fallback: Text for clients without this codec
+  func fallback(content: Poll) -> String? {
+    let optionsText = content.options
+      .enumerated()
+      .map { "\($0.offset + 1). \($0.element)" }
+      .joined(separator: "\n")
+    
+    return """
+    📊 Poll: \(content.question)
+    
+    \(optionsText)
+    
+    [This message contains a poll. Upgrade to view and vote.]
+    """
+  }
+  
+  // 5. Push: Should trigger notifications
+  func shouldPush(content: Poll) -> Bool {
+    true  // Polls should notify users
+  }
+}
+```
+
+### Step 4: Register the Codec
+
+Register your codec so it can be used:
+
+```swift
+// Option 1: Register globally for all clients
+Client.register(codec: PollCodec())
+
+// Option 2: Register when creating client
+let options = ClientOptions(
+  api: .init(env: .production),
+  codecs: [PollCodec()],
+  dbEncryptionKey: encryptionKey
+)
+let client = try await Client.create(account: wallet, options: options)
+```
+
+### Step 5: Use Your Custom Codec
+
+Now you can send and receive polls:
+
+```swift
+// Create a poll
+let poll = Poll(
+  question: "What time works for the meeting?",
+  options: ["9 AM", "2 PM", "5 PM"],
+  allowMultipleVotes: false,
+  expiresAt: Date().addingTimeInterval(86400) // 24 hours
+)
+
+// Send the poll
+try await group.send(
+  content: poll,
+  options: .init(contentType: ContentTypePoll)
+)
+
+// Receive and decode polls
+let messages = try await group.messages()
+for message in messages {
+  if message.contentTypeId == ContentTypePoll.id {
+    let poll: Poll = try message.content()
+    print("Poll: \(poll.question)")
+    poll.options.forEach { print("- \($0)") }
+  }
+}
+```
+
+## Advanced Example: Location Codec
+
+Here's a more complex example with nested types and metadata:
+
+```swift
+// Content type definition
+struct Location: Codable, Sendable {
+  let latitude: Double
+  let longitude: Double
+  let accuracy: Double?
+  let address: Address?
+  let timestamp: Date
+  
+  struct Address: Codable, Sendable {
+    let street: String?
+    let city: String?
+    let state: String?
+    let country: String?
+    let postalCode: String?
+  }
+}
+
+// Content type ID
+let ContentTypeLocation = ContentTypeID(
+  authorityID: "com.myapp",
+  typeID: "location",
+  versionMajor: 1,
+  versionMinor: 0
+)
+
+// Codec implementation
+struct LocationCodec: ContentCodec {
+  var contentType: ContentTypeID {
+    ContentTypeLocation
+  }
+  
+  func encode(content: Location, client: Client) throws -> EncodedContent {
+    let encoder = JSONEncoder()
+    encoder.dateEncodingStrategy = .iso8601
+    let data = try encoder.encode(content)
+    
+    var encoded = EncodedContent()
+    encoded.type = contentType
+    encoded.content = data
+    
+    // Add parameters for quick access
+    encoded.parameters["lat"] = String(content.latitude)
+    encoded.parameters["lon"] = String(content.longitude)
+    
+    return encoded
+  }
+  
+  func decode(content: EncodedContent, client: Client) throws -> Location {
+    let decoder = JSONDecoder()
+    decoder.dateDecodingStrategy = .iso8601
+    return try decoder.decode(Location.self, from: content.content)
+  }
+  
+  func fallback(content: Location) -> String? {
+    if let address = content.address, let city = address.city {
+      return "📍 \(city), \(address.state ?? address.country ?? "")"
+    }
+    return "📍 \(content.latitude), \(content.longitude)"
+  }
+  
+  func shouldPush(content: Location) -> Bool {
+    true
+  }
+}
+```
+
+## Handling Errors
+
+Implement proper error handling in your codecs:
+
+```swift
+enum CodecError: Error, LocalizedError {
+  case encodingFailed(String)
+  case decodingFailed(String)
+  case invalidContent(String)
+  case unsupportedVersion(major: UInt, minor: UInt)
+  
+  var errorDescription: String? {
+    switch self {
+    case .encodingFailed(let msg):
+      return "Encoding failed: \(msg)"
+    case .decodingFailed(let msg):
+      return "Decoding failed: \(msg)"
+    case .invalidContent(let msg):
+      return "Invalid content: \(msg)"
+    case .unsupportedVersion(let major, let minor):
+      return "Unsupported version: \(major).\(minor)"
+    }
+  }
+}
+
+struct SafeCodec: ContentCodec {
+  func encode(content: MyType, client: Client) throws -> EncodedContent {
+    guard content.isValid else {
+      throw CodecError.invalidContent("Missing required fields")
+    }
+    
+    // Encoding logic...
+  }
+  
+  func decode(content: EncodedContent, client: Client) throws -> MyType {
+    guard content.type == contentType else {
+      throw CodecError.decodingFailed("Content type mismatch")
+    }
+    
+    // Decoding logic...
+  }
+}
+```
+
+## Versioning Content Types
+
+Plan for evolution with proper versioning:
+
+```swift
+// Version 1.0 - Original
+struct PollV1: Codable, Sendable {
+  let question: String
+  let options: [String]
+}
+
+let ContentTypePollV1 = ContentTypeID(
+  authorityID: "com.myapp",
+  typeID: "poll",
+  versionMajor: 1,
+  versionMinor: 0
+)
+
+// Version 2.0 - Added features
+struct PollV2: Codable, Sendable {
+  let question: String
+  let options: [String]
+  let allowMultipleVotes: Bool    // New
+  let expiresAt: Date?            // New
+  let anonymous: Bool             // New
+}
+
+let ContentTypePollV2 = ContentTypeID(
+  authorityID: "com.myapp",
+  typeID: "poll",
+  versionMajor: 2,
+  versionMinor: 0
+)
+
+// Register both for compatibility
+Client.register(codec: PollCodecV1())
+Client.register(codec: PollCodecV2())
+
+// V2 codec can decode V1 content
+struct PollCodecV2: ContentCodec {
+  func decode(content: EncodedContent, client: Client) throws -> PollV2 {
+    if content.type.versionMajor == 1 {
+      // Migrate from V1 to V2
+      let v1 = try JSONDecoder().decode(PollV1.self, from: content.content)
+      return PollV2(
+        question: v1.question,
+        options: v1.options,
+        allowMultipleVotes: false,
+        expiresAt: nil,
+        anonymous: false
+      )
+    }
+    
+    return try JSONDecoder().decode(PollV2.self, from: content.content)
+  }
+}
+```
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Use Descriptive Fallback Text">
+    - Include essential information in fallback
+    - Use emoji for visual clarity
+    - Explain how to view full content
+    - Test fallback in unsupported clients
+  </Accordion>
+
+  <Accordion title="Handle Decoding Failures Gracefully">
+    - Validate content before encoding
+    - Use proper error types
+    - Provide fallback for decode errors
+    - Log errors for debugging
+  </Accordion>
+
+  <Accordion title="Version Thoughtfully">
+    - Use semantic versioning
+    - Support backwards compatibility
+    - Document version changes
+    - Test migration paths
+  </Accordion>
+
+  <Accordion title="Consider Content Size">
+    - Use compression for large content
+    - Consider RemoteAttachment for very large data
+    - Optimize serialization format
+    - Test with realistic data sizes
+  </Accordion>
+
+  <Accordion title="Test Thoroughly">
+    - Test encoding/decoding roundtrip
+    - Test with invalid data
+    - Test fallback rendering
+    - Test across different clients
+  </Accordion>
+</AccordionGroup>
+
+## Testing Your Codec
+
+```swift
+import XCTest
+@testable import XMTPiOS
+
+class PollCodecTests: XCTestCase {
+  func testEncodeDecode() async throws {
+    let codec = PollCodec()
+    let poll = Poll(
+      question: "Test?",
+      options: ["Yes", "No"]
+    )
+    
+    // Encode
+    let encoded = try codec.encode(content: poll, client: mockClient)
+    
+    // Verify encoding
+    XCTAssertEqual(encoded.type, ContentTypePoll)
+    XCTAssertFalse(encoded.content.isEmpty)
+    
+    // Decode
+    let decoded = try codec.decode(content: encoded, client: mockClient)
+    
+    // Verify decoding
+    XCTAssertEqual(decoded.question, poll.question)
+    XCTAssertEqual(decoded.options, poll.options)
+  }
+  
+  func testFallback() {
+    let codec = PollCodec()
+    let poll = Poll(
+      question: "What's your favorite?",
+      options: ["A", "B", "C"]
+    )
+    
+    let fallback = codec.fallback(content: poll)
+    XCTAssertNotNil(fallback)
+    XCTAssertTrue(fallback!.contains("Poll:"))
+    XCTAssertTrue(fallback!.contains("What's your favorite?"))
+  }
+}
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Codecs Concept" icon="code" href="/concepts/codecs">
+    Understand the codec system
+  </Card>
+  <Card title="Built-in Codecs" icon="box" href="/api/codecs/text">
+    Reference for standard codecs
+  </Card>
+  <Card title="Content Types Guide" icon="palette" href="/guides/content-types">
+    Using different content types
+  </Card>
+  <Card title="Sending Messages" icon="paper-plane" href="/guides/sending-messages">
+    Send custom content types
+  </Card>
+</CardGroup>
+
+## Related
+
+- [ContentCodec Protocol](/concepts/codecs#the-contentcodec-protocol) - Protocol reference
+- [Content Type ID](/concepts/codecs#content-type-structure) - Content type structure
+- [Codec Registry](/concepts/codecs#codec-registry) - Registration system

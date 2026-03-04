@@ -1,0 +1,754 @@
+---
+title: Receiving Messages
+description: Fetch message history, stream new messages, and handle different content types
+---
+
+The XMTP iOS SDK provides powerful methods for retrieving message history and listening for new messages in real-time.
+
+## Fetching Message History
+
+### Get All Messages
+
+Retrieve all messages from a conversation:
+
+```swift Conversation.swift:302-336
+let conversation = try await client.conversations.list().first!
+
+// Fetch all messages
+let messages = try await conversation.messages()
+
+for message in messages {
+    print("\(message.senderInboxId): \(message.content())")
+}
+```
+
+### Get Recent Messages
+
+Limit the number of messages returned:
+
+```swift Group.swift:550-623
+let recentMessages = try await conversation.messages(
+    limit: 50,
+    direction: .descending  // Most recent first
+)
+```
+
+### Get Messages with Filters
+
+Apply filters to retrieve specific messages:
+
+```swift Group.swift:550-623
+let now = Date().millisecondsSinceEpoch
+let oneDayAgo = now - (24 * 60 * 60 * 1000 * 1_000_000)
+
+let messages = try await conversation.messages(
+    beforeNs: now,
+    afterNs: oneDayAgo,
+    limit: 100,
+    direction: .descending,
+    deliveryStatus: .published  // or .unpublished, .failed, .all
+)
+```
+
+## Understanding Message Types
+
+### Raw Messages vs. Enriched Messages
+
+XMTP provides two ways to retrieve messages:
+
+<Tabs>
+  <Tab title="Raw Messages (messages)">
+    Returns messages without enriched metadata. Reactions, replies, and other content types are separate messages:
+
+    ```swift Conversation.swift:291-336
+    let messages = try await conversation.messages(limit: 50)
+    
+    // Reactions and replies are separate messages
+    for message in messages {
+        if message.contentTypeId == ContentTypeReaction {
+            let reaction: Reaction = try message.content()
+            print("Reaction: \(reaction.content)")
+        } else if message.contentTypeId == ContentTypeText {
+            let text: String = try message.content()
+            print("Text: \(text)")
+        }
+    }
+    ```
+  </Tab>
+
+  <Tab title="Enriched Messages (enrichedMessages)">
+    **Recommended for UI rendering.** Returns messages with reactions, replies, and metadata "baked in":
+
+    ```swift Conversation.swift:393-442
+    let messages = try await conversation.enrichedMessages(limit: 50)
+    
+    for message in messages {
+        let text: String = try message.content()
+        
+        // Access enriched metadata
+        if let reactions = message.reactions {
+            print("Reactions: \(reactions.count)")
+        }
+        
+        if let reply = message.reply {
+            print("Reply to: \(reply.reference)")
+        }
+    }
+    ```
+  </Tab>
+</Tabs>
+
+### When to Use Each Method
+
+- **Use `messages()`**: When you need raw message data or are building custom message processing
+- **Use `enrichedMessages()`**: When building UI that displays messages with reactions, replies, and other metadata
+
+## Streaming New Messages
+
+Listen for new messages in real-time:
+
+```swift Group.swift:489-521
+let conversation = try await client.conversations.list().first!
+
+let stream = conversation.streamMessages()
+
+for try await message in stream {
+    print("New message from \(message.senderInboxId): \(message.content())")
+}
+```
+
+### Stream with Cleanup
+
+Handle stream closure:
+
+```swift Group.swift:489-521
+let stream = conversation.streamMessages {
+    print("Stream closed")
+    // Perform cleanup
+}
+
+for try await message in stream {
+    print("New message: \(message.content())")
+}
+```
+
+### Stop Streaming
+
+End the message stream:
+
+```swift Group.swift:485-487
+let group = try await client.conversations.listGroups().first!
+
+let streamTask = Task {
+    for try await message in group.streamMessages() {
+        print("Message: \(message.content())")
+    }
+}
+
+// Later, stop streaming
+group.endStream()
+streamTask.cancel()
+```
+
+## Message Filtering
+
+### Filter by Time Range
+
+```swift Group.swift:550-623
+let startTime = Date().addingTimeInterval(-86400).millisecondsSinceEpoch
+let endTime = Date().millisecondsSinceEpoch
+
+let messages = try await conversation.messages(
+    beforeNs: endTime,
+    afterNs: startTime
+)
+```
+
+### Filter by Delivery Status
+
+```swift Group.swift:588-601
+// Get only published messages
+let published = try await conversation.messages(
+    deliveryStatus: .published
+)
+
+// Get failed messages for retry
+let failed = try await conversation.messages(
+    deliveryStatus: .failed
+)
+
+// Get unpublished (pending) messages
+let pending = try await conversation.messages(
+    deliveryStatus: .unpublished
+)
+```
+
+### Exclude Content Types
+
+Filter out specific message types:
+
+```swift Group.swift:556-614
+let messages = try await conversation.messages(
+    excludeContentTypes: [
+        StandardContentType.reaction,
+        StandardContentType.readReceipt
+    ]
+)
+```
+
+### Exclude Senders
+
+Filter out messages from specific inbox IDs:
+
+```swift Group.swift:557-614
+let messages = try await conversation.messages(
+    excludeSenderInboxIds: [blockedInboxId]
+)
+```
+
+### Filter by Insertion Time
+
+Filter by when messages were inserted into local database:
+
+```swift Group.swift:559-617
+let lastSync = UserDefaults.standard.integer(forKey: "lastSyncTime")
+
+let newMessages = try await conversation.messages(
+    insertedAfterNs: Int64(lastSync)
+)
+```
+
+## Sorting Messages
+
+### Sort Direction
+
+```swift Group.swift:554-612
+// Descending (newest first)
+let newest = try await conversation.messages(
+    direction: .descending
+)
+
+// Ascending (oldest first)
+let oldest = try await conversation.messages(
+    direction: .ascending
+)
+```
+
+### Sort By Field
+
+```swift Group.swift:558
+let messages = try await conversation.messages(
+    sortBy: .sentAt  // Sort by time sent
+)
+```
+
+## Decoding Message Content
+
+### Text Messages
+
+```swift TextCodec.swift:33-43
+let message = messages.first!
+
+if message.contentTypeId == ContentTypeText {
+    let text: String = try message.content()
+    print("Text: \(text)")
+}
+```
+
+### Attachments
+
+```swift AttachmentCodec.swift:52-60
+if message.contentTypeId == ContentTypeAttachment {
+    let attachment: Attachment = try message.content()
+    
+    print("Filename: \(attachment.filename)")
+    print("MIME type: \(attachment.mimeType)")
+    print("Size: \(attachment.data.count) bytes")
+    
+    // Save to file
+    try attachment.data.write(to: fileURL)
+}
+```
+
+### Remote Attachments
+
+```swift RemoteAttachmentCodec.swift:158-172
+if message.contentTypeId == ContentTypeRemoteAttachment {
+    let remoteAttachment: RemoteAttachment = try message.content()
+    
+    // Fetch the actual content
+    let encodedContent = try await remoteAttachment.content()
+    
+    // Decode the attachment
+    let codec = AttachmentCodec()
+    let attachment: Attachment = try codec.decode(content: encodedContent)
+    
+    print("Downloaded: \(attachment.filename)")
+}
+```
+
+### Reactions
+
+```swift ReactionCodec.swift:86-101
+if message.contentTypeId == ContentTypeReaction {
+    let reaction: Reaction = try message.content()
+    
+    print("Reaction: \(reaction.content)")
+    print("Action: \(reaction.action)")
+    print("Reference: \(reaction.reference)")
+    print("Schema: \(reaction.schema)")
+}
+```
+
+### Replies
+
+```swift ReplyCodec.swift:51-65
+if message.contentTypeId == ContentTypeReply {
+    let reply: Reply = try message.content()
+    
+    print("Reply to: \(reply.reference)")
+    
+    // The reply contains the original content
+    if reply.contentType == ContentTypeText {
+        let text = reply.content as! String
+        print("Reply text: \(text)")
+    }
+}
+```
+
+### Read Receipts
+
+```swift ReadReceiptCodec.swift:37-39
+if message.contentTypeId == ContentTypeReadReceipt {
+    let receipt: ReadReceipt = try message.content()
+    print("Message was read")
+}
+```
+
+## Working with Enriched Messages
+
+### Access Message Content
+
+```swift
+let messages = try await conversation.enrichedMessages(limit: 50)
+
+for message in messages {
+    // Get primary content
+    let text: String = try message.content()
+    print("Message: \(text)")
+    
+    // Access metadata
+    if let reactions = message.reactions {
+        for reaction in reactions {
+            print("  Reaction: \(reaction.content)")
+        }
+    }
+    
+    if let reply = message.reply {
+        print("  In reply to: \(reply.reference)")
+    }
+}
+```
+
+### Get Last Message
+
+```swift Conversation.swift:46-53
+if let lastMessage = try await conversation.lastMessage() {
+    print("Last message: \(lastMessage.content())")
+    print("Sent at: \(lastMessage.sentAt)")
+}
+```
+
+## Counting Messages
+
+### Total Message Count
+
+```swift Conversation.swift:444-471
+let totalCount = try conversation.countMessages()
+print("Total messages: \(totalCount)")
+```
+
+### Count with Filters
+
+```swift Group.swift:793-815
+let recentCount = try conversation.countMessages(
+    afterNs: oneDayAgo,
+    deliveryStatus: .published
+)
+
+print("Recent published messages: \(recentCount)")
+```
+
+## Getting Messages with Reactions
+
+Get messages with their reactions attached:
+
+```swift Conversation.swift:357-391
+let messages = try await conversation.messagesWithReactions(
+    limit: 50,
+    direction: .descending
+)
+
+for message in messages {
+    print("Message: \(message.content())")
+    
+    // Reactions are included
+    if message.contentTypeId == ContentTypeReaction {
+        let reaction: Reaction = try message.content()
+        print("  Reaction: \(reaction.content)")
+    }
+}
+```
+
+## Message Callbacks
+
+### Process Streamed Messages
+
+Handle messages as they arrive:
+
+```swift Group.swift:3-26
+final class MessageHandler: FfiMessageCallback {
+    func onMessage(message: FfiMessage) {
+        if let decoded = DecodedMessage.create(ffiMessage: message) {
+            print("New message: \(decoded.content())")
+            // Update UI, send notification, etc.
+        }
+    }
+    
+    func onError(error: FfiSubscribeError) {
+        print("Stream error: \(error)")
+    }
+    
+    func onClose() {
+        print("Stream closed")
+    }
+}
+
+let handler = MessageHandler()
+let stream = await group.stream(messageCallback: handler)
+```
+
+## Finding Specific Messages
+
+### Find by Message ID
+
+```swift Conversations.swift:228-238
+if let message = try client.conversations.findMessage(
+    messageId: messageId
+) {
+    print("Found message: \(message.content())")
+}
+```
+
+### Find Enriched Message
+
+```swift Conversations.swift:240-248
+if let message = try client.conversations.findEnrichedMessage(
+    messageId: messageId
+) {
+    print("Found enriched message with metadata")
+}
+```
+
+## Processing Different Content Types
+
+### Generic Content Decoding
+
+```swift
+func processMessage(_ message: DecodedMessage) {
+    switch message.contentTypeId {
+    case ContentTypeText:
+        let text: String = try! message.content()
+        displayText(text)
+        
+    case ContentTypeAttachment:
+        let attachment: Attachment = try! message.content()
+        displayAttachment(attachment)
+        
+    case ContentTypeReaction:
+        let reaction: Reaction = try! message.content()
+        displayReaction(reaction)
+        
+    case ContentTypeReply:
+        let reply: Reply = try! message.content()
+        displayReply(reply)
+        
+    case ContentTypeReadReceipt:
+        updateReadStatus()
+        
+    default:
+        print("Unknown content type: \(message.contentTypeId)")
+    }
+}
+```
+
+## Pagination
+
+### Load More Messages
+
+```swift
+var allMessages: [DecodedMessage] = []
+var oldestTimestamp: Int64? = nil
+let pageSize = 50
+
+repeat {
+    let page = try await conversation.messages(
+        beforeNs: oldestTimestamp,
+        limit: pageSize,
+        direction: .descending
+    )
+    
+    allMessages.append(contentsOf: page)
+    oldestTimestamp = page.last?.sentAtNs
+    
+    print("Loaded \(page.count) messages, total: \(allMessages.count)")
+    
+} while oldestTimestamp != nil && !page.isEmpty
+```
+
+### Load Newer Messages
+
+```swift
+let newestTimestamp = messages.first?.sentAtNs ?? 0
+
+let newerMessages = try await conversation.messages(
+    afterNs: newestTimestamp,
+    direction: .ascending
+)
+
+if !newerMessages.isEmpty {
+    print("Found \(newerMessages.count) new messages")
+}
+```
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Use enrichedMessages for UI">
+    When building chat interfaces, prefer `enrichedMessages()` for better performance:
+    
+    ```swift
+    // Better for UI - reactions and replies are included
+    let messages = try await conversation.enrichedMessages(limit: 50)
+    
+    for message in messages {
+        let text: String = try message.content()
+        let reactions = message.reactions ?? []
+        
+        displayMessage(text: text, reactions: reactions)
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="Sync before fetching">
+    Always sync the conversation before fetching messages:
+    
+    ```swift
+    try await conversation.sync()
+    let messages = try await conversation.messages()
+    ```
+  </Accordion>
+
+  <Accordion title="Handle content types gracefully">
+    Always check content types before decoding:
+    
+    ```swift
+    for message in messages {
+        switch message.contentTypeId {
+        case ContentTypeText:
+            let text: String = try message.content()
+            print(text)
+        default:
+            // Handle unknown types
+            if let fallback = message.fallback {
+                print("Unsupported: \(fallback)")
+            }
+        }
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="Implement pagination">
+    Load messages in pages for better performance:
+    
+    ```swift
+    func loadMoreMessages() async throws {
+        let lastMessage = displayedMessages.last
+        
+        let more = try await conversation.messages(
+            beforeNs: lastMessage?.sentAtNs,
+            limit: 50
+        )
+        
+        displayedMessages.append(contentsOf: more)
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="Cache message data">
+    Store messages locally to reduce network requests:
+    
+    ```swift
+    // First load from cache
+    var messages = database.getMessages(conversationId: conversation.id)
+    
+    // Then sync and update
+    try await conversation.sync()
+    let newMessages = try await conversation.messages(
+        insertedAfterNs: lastSyncTime
+    )
+    
+    if !newMessages.isEmpty {
+        database.saveMessages(newMessages)
+        messages.append(contentsOf: newMessages)
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="Use streams for real-time updates">
+    Stream messages for real-time chat experiences:
+    
+    ```swift
+    Task {
+        let stream = conversation.streamMessages()
+        
+        for try await message in stream {
+            await MainActor.run {
+                displayNewMessage(message)
+                playNotificationSound()
+            }
+        }
+    }
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Examples
+
+### Build a Message List
+
+```swift
+class MessageListViewModel: ObservableObject {
+    @Published var messages: [DecodedMessageV2] = []
+    private var streamTask: Task<Void, Never>?
+    
+    func loadMessages(conversation: Conversation) async {
+        do {
+            // Sync first
+            try await conversation.sync()
+            
+            // Load initial messages
+            messages = try await conversation.enrichedMessages(
+                limit: 50,
+                direction: .descending
+            )
+            
+            // Start streaming new messages
+            startStreaming(conversation)
+            
+        } catch {
+            print("Failed to load messages: \(error)")
+        }
+    }
+    
+    func startStreaming(_ conversation: Conversation) {
+        streamTask = Task { [weak self] in
+            let stream = conversation.streamMessages()
+            
+            for try await message in stream {
+                guard !Task.isCancelled else { break }
+                
+                await MainActor.run {
+                    self?.messages.insert(
+                        DecodedMessageV2.create(ffiMessage: message),
+                        at: 0
+                    )
+                }
+            }
+        }
+    }
+    
+    func loadMore() async {
+        guard let oldest = messages.last else { return }
+        
+        let more = try? await conversation.enrichedMessages(
+            beforeNs: oldest.sentAtNs,
+            limit: 50
+        )
+        
+        if let more = more {
+            messages.append(contentsOf: more)
+        }
+    }
+    
+    deinit {
+        streamTask?.cancel()
+    }
+}
+```
+
+### Download Remote Attachment
+
+```swift
+func downloadRemoteAttachment(
+    from message: DecodedMessage
+) async throws -> Attachment {
+    guard message.contentTypeId == ContentTypeRemoteAttachment else {
+        throw AttachmentError.wrongType
+    }
+    
+    // Get remote attachment
+    let remote: RemoteAttachment = try message.content()
+    
+    print("Downloading from: \(remote.url)")
+    
+    // Fetch encrypted content
+    let encodedContent = try await remote.content()
+    
+    // Decode attachment
+    let codec = AttachmentCodec()
+    let attachment = try codec.decode(content: encodedContent)
+    
+    print("Downloaded: \(attachment.filename)")
+    return attachment
+}
+```
+
+### Group Messages by Sender
+
+```swift
+struct GroupedMessages {
+    let sender: String
+    let messages: [DecodedMessage]
+}
+
+func groupMessagesBySender(
+    _ messages: [DecodedMessage]
+) -> [GroupedMessages] {
+    let grouped = Dictionary(grouping: messages) { $0.senderInboxId }
+    
+    return grouped.map { sender, messages in
+        GroupedMessages(
+            sender: sender,
+            messages: messages.sorted { $0.sentAtNs < $1.sentAtNs }
+        )
+    }
+}
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Content Types" icon="file-code" href="/guides/content-types">
+    Learn about all available content types
+  </Card>
+  <Card title="Sending Messages" icon="paper-plane" href="/guides/sending-messages">
+    See how to send messages
+  </Card>
+  <Card title="Group Chat" icon="users" href="/guides/group-chat">
+    Explore group-specific features
+  </Card>
+  <Card title="Direct Messages" icon="message" href="/guides/direct-messages">
+    Learn about DM functionality
+  </Card>
+</CardGroup>

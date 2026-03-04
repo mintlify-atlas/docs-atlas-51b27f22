@@ -1,0 +1,355 @@
+---
+title: Encryption & Security
+description: Understanding XMTP's end-to-end encryption and security features
+---
+
+## Overview
+
+XMTP provides end-to-end encrypted messaging using the MLS (Message Layer Security) protocol. Every message is encrypted before leaving the sender's device and can only be decrypted by authorized recipients.
+
+## MLS Protocol
+
+### What is MLS?
+
+MLS (Message Layer Security) is an IETF standard protocol for secure group messaging. XMTP V3 (used by xmtp-ios 4.0+) is built entirely on MLS, providing:
+
+- **End-to-end encryption** - Messages are encrypted on the sender's device and only decrypted by recipients
+- **Forward secrecy** - Compromising current keys doesn't expose past messages
+- **Post-compromise security** - The system can recover from key compromise
+- **Group encryption** - Efficient encryption for group conversations
+- **Identity verification** - Cryptographic proof of sender identity
+
+### Key Features
+
+<AccordionGroup>
+  <Accordion title="End-to-End Encryption">
+    Messages are encrypted locally before transmission and only the intended recipients can decrypt them. The XMTP network never has access to message content.
+  </Accordion>
+
+  <Accordion title="Perfect Forward Secrecy">
+    Session keys are ephemeral and regularly rotated. Even if an attacker compromises current keys, they cannot decrypt past messages.
+  </Accordion>
+
+  <Accordion title="Post-Compromise Security">
+    If keys are compromised, the protocol can recover security through key updates and healing operations.
+  </Accordion>
+
+  <Accordion title="Identity Binding">
+    Each message is cryptographically signed, proving it came from the claimed sender's wallet.
+  </Accordion>
+</AccordionGroup>
+
+## Database Encryption
+
+### Encryption Key Requirement
+
+The SDK stores data in an encrypted SQLite database. You **must** provide an encryption key:
+
+```swift
+import CryptoKit
+
+// Generate a secure encryption key
+let encryptionKey = SymmetricKey(size: .bits256)
+let keyData = encryptionKey.withUnsafeBytes { Data($0) }
+
+let options = ClientOptions(
+  api: .init(env: .production),
+  dbEncryptionKey: keyData
+)
+
+let client = try await Client.create(account: wallet, options: options)
+```
+
+<Warning>
+**Critical Security Requirement:**
+- The database encryption key is required and must be 32 bytes (256 bits)
+- You must use the **same key** for a user across all sessions
+- Store the key securely using iOS Keychain
+- Never hardcode encryption keys in your app
+- Losing the key means losing access to all conversation data
+</Warning>
+
+### Secure Key Storage
+
+Store encryption keys in the iOS Keychain:
+
+```swift
+import Security
+
+class KeychainManager {
+  static func saveEncryptionKey(_ key: Data, for inboxId: String) throws {
+    let query: [String: Any] = [
+      kSecClass as String: kSecClassGenericPassword,
+      kSecAttrAccount as String: "xmtp_encryption_\(inboxId)",
+      kSecAttrService as String: "com.myapp.xmtp",
+      kSecValueData as String: key,
+      kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+    ]
+    
+    let status = SecItemAdd(query as CFDictionary, nil)
+    guard status == errSecSuccess else {
+      throw KeychainError.saveFailed(status)
+    }
+  }
+  
+  static func loadEncryptionKey(for inboxId: String) throws -> Data {
+    let query: [String: Any] = [
+      kSecClass as String: kSecClassGenericPassword,
+      kSecAttrAccount as String: "xmtp_encryption_\(inboxId)",
+      kSecAttrService as String: "com.myapp.xmtp",
+      kSecReturnData as String: true
+    ]
+    
+    var result: AnyObject?
+    let status = SecItemCopyMatching(query as CFDictionary, &result)
+    
+    guard status == errSecSuccess, let keyData = result as? Data else {
+      throw KeychainError.loadFailed(status)
+    }
+    
+    return keyData
+  }
+}
+
+// Usage
+let key = SymmetricKey(size: .bits256).withUnsafeBytes { Data($0) }
+try KeychainManager.saveEncryptionKey(key, for: inboxId)
+
+// Later...
+let savedKey = try KeychainManager.loadEncryptionKey(for: inboxId)
+let client = try await Client.build(address: address, options: .init(
+  api: .init(env: .production),
+  dbEncryptionKey: savedKey
+))
+```
+
+## What's Encrypted
+
+### Message Content
+All message content is end-to-end encrypted:
+- Message text and attachments
+- Reactions and replies
+- Custom content types
+- Read receipts
+
+### Conversation Metadata
+Conversation-level data is encrypted:
+- Group member lists
+- Group names and descriptions
+- Conversation settings
+- Member permissions
+
+### Local Storage
+The local database is encrypted at rest:
+- All conversations
+- All messages
+- Cryptographic keys
+- User preferences
+
+## What's Not Encrypted
+
+Some metadata is visible to the network:
+- Inbox IDs (stable user identifiers)
+- Conversation topics
+- Message timestamps
+- Message sizes
+- Network routing information
+
+<Note>
+This metadata is necessary for message routing and delivery but doesn't reveal message content.
+</Note>
+
+## Key Management
+
+### Installation Keys
+
+Each client installation has its own cryptographic identity:
+
+```swift
+let client = try await Client.create(account: wallet)
+print("Installation ID: \(client.installationID)")
+```
+
+Multiple installations (devices) can share the same inbox ID while maintaining separate encryption keys.
+
+### Key Rotation
+
+MLS automatically rotates encryption keys:
+- Group keys are updated when membership changes
+- Session keys are ephemeral
+- Keys are never reused
+
+### Key Revocation
+
+Revoke compromised installations:
+
+```swift
+// Revoke specific installation
+try await client.revokeInstallations(installations: [installationId])
+
+// Revoke all other installations
+try await client.revokeAllOtherInstallations()
+```
+
+## Authentication
+
+### Wallet-Based Authentication
+
+XMTP uses wallet signatures for authentication:
+
+```swift
+class WalletSigner: SigningKey {
+  let address: String
+  let publicIdentity: PublicIdentity
+  
+  func sign(_ data: Data) async throws -> SignedData {
+    // Sign with wallet's private key
+    let signature = try await wallet.sign(data)
+    return SignedData(signature: signature)
+  }
+}
+
+let wallet = WalletSigner(address: walletAddress)
+let client = try await Client.create(account: wallet)
+```
+
+### Identity Verification
+
+Every message includes cryptographic proof of the sender's identity:
+
+```swift
+// Sender's inbox ID is verified cryptographically
+let message = messages.first!
+print("Verified sender: \(message.senderInboxId)")
+```
+
+## Multi-Device Security
+
+### Device Sync
+
+XMTP supports secure multi-device messaging:
+
+```swift
+let options = ClientOptions(
+  api: .init(env: .production),
+  dbEncryptionKey: encryptionKey,
+  deviceSyncEnabled: true  // Enable device sync
+)
+
+let client = try await Client.create(account: wallet, options: options)
+```
+
+With device sync enabled:
+- Messages sync across your devices
+- Each device maintains its own encryption keys
+- Compromising one device doesn't compromise others
+
+### History Sync
+
+Securely sync message history to new devices:
+
+```swift
+let options = ClientOptions(
+  api: .init(env: .production),
+  dbEncryptionKey: encryptionKey,
+  historySyncUrl: "https://history-sync.xmtp.network"
+)
+```
+
+## Security Best Practices
+
+<AccordionGroup>
+  <Accordion title="Protect Encryption Keys">
+    - Generate unique keys per user
+    - Store keys in iOS Keychain only
+    - Never log or transmit keys
+    - Delete keys on user logout
+    - Use appropriate keychain accessibility settings
+  </Accordion>
+
+  <Accordion title="Verify User Identity">
+    - Display sender inbox IDs to users
+    - Implement address book / contact verification
+    - Warn users about unknown contacts
+    - Consider implementing trust-on-first-use (TOFU)
+  </Accordion>
+
+  <Accordion title="Handle Key Loss">
+    - Implement key backup (securely!)
+    - Warn users about key importance
+    - Provide account recovery flow
+    - Consider social recovery mechanisms
+  </Accordion>
+
+  <Accordion title="Secure Development">
+    - Use production environment for live apps
+    - Implement certificate pinning
+    - Validate all inputs
+    - Keep SDK updated
+    - Follow iOS security guidelines
+  </Accordion>
+
+  <Accordion title="Monitor Security">
+    - Log authentication failures
+    - Monitor for suspicious activity
+    - Implement rate limiting
+    - Review security regularly
+  </Accordion>
+</AccordionGroup>
+
+## Compliance & Privacy
+
+### GDPR Compliance
+
+XMTP's architecture supports privacy regulations:
+- Users control their data
+- Messages can be deleted locally
+- Minimal metadata collection
+- No server-side message storage
+
+### Data Portability
+
+Export user data:
+
+```swift
+// Export database for backup
+let archive = try await client.createArchive()
+// Save archive securely
+
+// Import on another device
+try await Client.importArchive(archive)
+```
+
+## Audits & Standards
+
+XMTP's security is based on:
+- **MLS Protocol**: IETF RFC 9420
+- **Cryptographic Primitives**: Industry-standard algorithms
+- **Open Source**: Code is publicly auditable
+
+<Note>
+For security vulnerability reports, contact the XMTP team through their [GitHub security policy](https://github.com/xmtp/xmtp-ios/security).
+</Note>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Client Options" icon="gear" href="/api/client-options">
+    Configure encryption and security settings
+  </Card>
+  <Card title="Environments" icon="server" href="/advanced/environments">
+    Choose the right environment
+  </Card>
+  <Card title="Fork Recovery" icon="rotate" href="/advanced/fork-recovery">
+    Handle encryption state issues
+  </Card>
+  <Card title="SigningKey" icon="key" href="/api/signing-key">
+    Implement wallet authentication
+  </Card>
+</CardGroup>
+
+## Related
+
+- [MLS Protocol](https://messaginglayersecurity.rocks/) - Official MLS documentation
+- [Client API](/api/client) - Client security methods
+- [Database Management](/api/client#database-management) - Database encryption APIs

@@ -1,0 +1,775 @@
+---
+title: "Conversations"
+description: "API reference for managing conversations in XMTP iOS SDK"
+---
+
+The `Conversations` class provides methods for creating, listing, and managing conversations (both groups and DMs).
+
+Access via `client.conversations`.
+
+## Creating Conversations
+
+### newGroup()
+
+Create a new group conversation with inbox IDs.
+
+```swift
+public func newGroup(
+    with inboxIds: [InboxId],
+    permissions: GroupPermissionPreconfiguration = .allMembers,
+    name: String = "",
+    imageUrl: String = "",
+    description: String = "",
+    disappearingMessageSettings: DisappearingMessageSettings? = nil,
+    appData: String? = nil
+) async throws -> Group
+```
+
+<ParamField path="inboxIds" type="[String]" required>
+  Array of inbox IDs to add to the group
+</ParamField>
+
+<ParamField path="permissions" type="GroupPermissionPreconfiguration" default=".allMembers">
+  Permission preset for the group (.allMembers or .adminOnly)
+</ParamField>
+
+<ParamField path="name" type="String" default='""'>
+  Group name
+</ParamField>
+
+<ParamField path="imageUrl" type="String" default='""'>
+  Group image URL (square)
+</ParamField>
+
+<ParamField path="description" type="String" default='""'>
+  Group description
+</ParamField>
+
+<ParamField path="disappearingMessageSettings" type="DisappearingMessageSettings" optional>
+  Disappearing message settings for the group
+</ParamField>
+
+<ParamField path="appData" type="String" optional>
+  Custom application data
+</ParamField>
+
+<ResponseField name="group" type="Group">
+  The newly created group
+</ResponseField>
+
+```swift
+let group = try await client.conversations.newGroup(
+    with: ["inbox1", "inbox2"],
+    permissions: .allMembers,
+    name: "Dev Team",
+    imageUrl: "https://example.com/image.png",
+    description: "Discussion for developers"
+)
+```
+
+### newGroupWithIdentities()
+
+Create a new group conversation with public identities.
+
+```swift
+public func newGroupWithIdentities(
+    with identities: [PublicIdentity],
+    permissions: GroupPermissionPreconfiguration = .allMembers,
+    name: String = "",
+    imageUrl: String = "",
+    description: String = "",
+    disappearingMessageSettings: DisappearingMessageSettings? = nil,
+    appData: String? = nil
+) async throws -> Group
+```
+
+<ParamField path="identities" type="[PublicIdentity]" required>
+  Array of public identities to add to the group
+</ParamField>
+
+Other parameters are the same as `newGroup()`.
+
+```swift
+let identity1 = PublicIdentity(kind: .ethereum, identifier: "0x123...")
+let identity2 = PublicIdentity(kind: .ethereum, identifier: "0x456...")
+
+let group = try await client.conversations.newGroupWithIdentities(
+    with: [identity1, identity2],
+    name: "Friends"
+)
+```
+
+### newGroupCustomPermissions()
+
+Create a group with custom permission policies.
+
+```swift
+public func newGroupCustomPermissions(
+    with inboxIds: [InboxId],
+    permissionPolicySet: PermissionPolicySet,
+    name: String = "",
+    imageUrl: String = "",
+    description: String = "",
+    disappearingMessageSettings: DisappearingMessageSettings? = nil,
+    appData: String? = nil
+) async throws -> Group
+```
+
+<ParamField path="inboxIds" type="[String]" required>
+  Array of inbox IDs to add to the group
+</ParamField>
+
+<ParamField path="permissionPolicySet" type="PermissionPolicySet" required>
+  Custom permission policy set
+</ParamField>
+
+Other parameters are the same as `newGroup()`.
+
+### newGroupOptimistic()
+
+Create a group locally without waiting for network confirmation.
+
+```swift
+public func newGroupOptimistic(
+    permissions: GroupPermissionPreconfiguration = .allMembers,
+    groupName: String = "",
+    groupImageUrlSquare: String = "",
+    groupDescription: String = "",
+    disappearingMessageSettings: DisappearingMessageSettings? = nil,
+    appData: String? = nil
+) throws -> Group
+```
+
+<ParamField path="permissions" type="GroupPermissionPreconfiguration" default=".allMembers">
+  Permission preset for the group
+</ParamField>
+
+<ParamField path="groupName" type="String" default='""'>
+  Group name
+</ParamField>
+
+<ParamField path="groupImageUrlSquare" type="String" default='""'>
+  Group image URL
+</ParamField>
+
+<ParamField path="groupDescription" type="String" default='""'>
+  Group description
+</ParamField>
+
+<ParamField path="disappearingMessageSettings" type="DisappearingMessageSettings" optional>
+  Disappearing message settings
+</ParamField>
+
+<ParamField path="appData" type="String" optional>
+  Custom application data
+</ParamField>
+
+<ResponseField name="group" type="Group">
+  The created group (not yet published to network)
+</ResponseField>
+
+```swift
+let group = try client.conversations.newGroupOptimistic(
+    permissions: .allMembers,
+    groupName: "Local Group"
+)
+// Later, publish to network
+try await group.publishMessages()
+```
+
+### newConversation()
+
+Create a new DM conversation by inbox ID.
+
+```swift
+public func newConversation(
+    with peerInboxId: InboxId,
+    disappearingMessageSettings: DisappearingMessageSettings? = nil
+) async throws -> Conversation
+```
+
+<ParamField path="peerInboxId" type="String" required>
+  The inbox ID of the peer
+</ParamField>
+
+<ParamField path="disappearingMessageSettings" type="DisappearingMessageSettings" optional>
+  Disappearing message settings
+</ParamField>
+
+<ResponseField name="conversation" type="Conversation">
+  The conversation (wrapping a DM)
+</ResponseField>
+
+```swift
+let conversation = try await client.conversations.newConversation(
+    with: "inboxId123"
+)
+```
+
+### newConversationWithIdentity()
+
+Create a new DM conversation by public identity.
+
+```swift
+public func newConversationWithIdentity(
+    with peerIdentity: PublicIdentity,
+    disappearingMessageSettings: DisappearingMessageSettings? = nil
+) async throws -> Conversation
+```
+
+<ParamField path="peerIdentity" type="PublicIdentity" required>
+  The public identity of the peer
+</ParamField>
+
+<ParamField path="disappearingMessageSettings" type="DisappearingMessageSettings" optional>
+  Disappearing message settings
+</ParamField>
+
+<ResponseField name="conversation" type="Conversation">
+  The conversation (wrapping a DM)
+</ResponseField>
+
+```swift
+let identity = PublicIdentity(kind: .ethereum, identifier: "0x123...")
+let conversation = try await client.conversations.newConversationWithIdentity(
+    with: identity
+)
+```
+
+### findOrCreateDm()
+
+Find an existing DM or create a new one by inbox ID.
+
+```swift
+public func findOrCreateDm(
+    with peerInboxId: InboxId,
+    disappearingMessageSettings: DisappearingMessageSettings? = nil
+) async throws -> Dm
+```
+
+<ParamField path="peerInboxId" type="String" required>
+  The inbox ID of the peer
+</ParamField>
+
+<ParamField path="disappearingMessageSettings" type="DisappearingMessageSettings" optional>
+  Disappearing message settings (only used if creating new)
+</ParamField>
+
+<ResponseField name="dm" type="Dm">
+  The existing or newly created DM
+</ResponseField>
+
+```swift
+let dm = try await client.conversations.findOrCreateDm(with: "inboxId123")
+```
+
+### findOrCreateDmWithIdentity()
+
+Find an existing DM or create a new one by public identity.
+
+```swift
+public func findOrCreateDmWithIdentity(
+    with peerIdentity: PublicIdentity,
+    disappearingMessageSettings: DisappearingMessageSettings? = nil
+) async throws -> Dm
+```
+
+<ParamField path="peerIdentity" type="PublicIdentity" required>
+  The public identity of the peer
+</ParamField>
+
+<ParamField path="disappearingMessageSettings" type="DisappearingMessageSettings" optional>
+  Disappearing message settings
+</ParamField>
+
+<ResponseField name="dm" type="Dm">
+  The existing or newly created DM
+</ResponseField>
+
+## Listing Conversations
+
+### list()
+
+List all conversations (both groups and DMs).
+
+```swift
+public func list(
+    createdAfterNs: Int64? = nil,
+    createdBeforeNs: Int64? = nil,
+    lastActivityAfterNs: Int64? = nil,
+    lastActivityBeforeNs: Int64? = nil,
+    limit: Int? = nil,
+    consentStates: [ConsentState]? = nil,
+    orderBy: ConversationsOrderBy = .lastActivity
+) async throws -> [Conversation]
+```
+
+<ParamField path="createdAfterNs" type="Int64" optional>
+  Filter to conversations created after this timestamp (nanoseconds)
+</ParamField>
+
+<ParamField path="createdBeforeNs" type="Int64" optional>
+  Filter to conversations created before this timestamp
+</ParamField>
+
+<ParamField path="lastActivityAfterNs" type="Int64" optional>
+  Filter to conversations with activity after this timestamp
+</ParamField>
+
+<ParamField path="lastActivityBeforeNs" type="Int64" optional>
+  Filter to conversations with activity before this timestamp
+</ParamField>
+
+<ParamField path="limit" type="Int" optional>
+  Maximum number of conversations to return
+</ParamField>
+
+<ParamField path="consentStates" type="[ConsentState]" optional>
+  Filter by consent state (.allowed, .denied, .unknown)
+</ParamField>
+
+<ParamField path="orderBy" type="ConversationsOrderBy" default=".lastActivity">
+  Sort order (.createdAt or .lastActivity)
+</ParamField>
+
+<ResponseField name="conversations" type="[Conversation]">
+  Array of conversations
+</ResponseField>
+
+```swift
+let conversations = try await client.conversations.list(
+    limit: 20,
+    consentStates: [.allowed],
+    orderBy: .lastActivity
+)
+```
+
+### listGroups()
+
+List only group conversations.
+
+```swift
+public func listGroups(
+    createdAfterNs: Int64? = nil,
+    createdBeforeNs: Int64? = nil,
+    lastActivityAfterNs: Int64? = nil,
+    lastActivityBeforeNs: Int64? = nil,
+    limit: Int? = nil,
+    consentStates: [ConsentState]? = nil,
+    orderBy: ConversationsOrderBy = .lastActivity
+) throws -> [Group]
+```
+
+Parameters are the same as `list()`.
+
+<ResponseField name="groups" type="[Group]">
+  Array of groups
+</ResponseField>
+
+```swift
+let groups = try client.conversations.listGroups(limit: 10)
+```
+
+### listDms()
+
+List only DM conversations.
+
+```swift
+public func listDms(
+    createdAfterNs: Int64? = nil,
+    createdBeforeNs: Int64? = nil,
+    lastActivityAfterNs: Int64? = nil,
+    lastActivityBeforeNs: Int64? = nil,
+    limit: Int? = nil,
+    consentStates: [ConsentState]? = nil,
+    orderBy: ConversationsOrderBy = .lastActivity
+) throws -> [Dm]
+```
+
+Parameters are the same as `list()`.
+
+<ResponseField name="dms" type="[Dm]">
+  Array of DMs
+</ResponseField>
+
+```swift
+let dms = try client.conversations.listDms(orderBy: .createdAt)
+```
+
+## Finding Conversations
+
+### findGroup()
+
+Find a group by ID.
+
+```swift
+public func findGroup(groupId: String) throws -> Group?
+```
+
+<ParamField path="groupId" type="String" required>
+  The hex-encoded group ID
+</ParamField>
+
+<ResponseField name="group" type="Group?">
+  The group if found, nil otherwise
+</ResponseField>
+
+```swift
+if let group = try client.conversations.findGroup(groupId: "abc123") {
+    print("Found group: \(group.id)")
+}
+```
+
+### findConversation()
+
+Find a conversation by ID.
+
+```swift
+public func findConversation(conversationId: String) async throws -> Conversation?
+```
+
+<ParamField path="conversationId" type="String" required>
+  The hex-encoded conversation ID
+</ParamField>
+
+<ResponseField name="conversation" type="Conversation?">
+  The conversation if found, nil otherwise
+</ResponseField>
+
+### findConversationByTopic()
+
+Find a conversation by topic string.
+
+```swift
+public func findConversationByTopic(topic: String) async throws -> Conversation?
+```
+
+<ParamField path="topic" type="String" required>
+  The topic string (format: /xmtp/mls/1/g-{conversationId}/proto)
+</ParamField>
+
+<ResponseField name="conversation" type="Conversation?">
+  The conversation if found, nil otherwise
+</ResponseField>
+
+### findDmByInboxId()
+
+Find a DM by peer inbox ID.
+
+```swift
+public func findDmByInboxId(inboxId: InboxId) throws -> Dm?
+```
+
+<ParamField path="inboxId" type="String" required>
+  The peer's inbox ID
+</ParamField>
+
+<ResponseField name="dm" type="Dm?">
+  The DM if found, nil otherwise
+</ResponseField>
+
+### findDmByIdentity()
+
+Find a DM by peer identity.
+
+```swift
+public func findDmByIdentity(publicIdentity: PublicIdentity) async throws -> Dm?
+```
+
+<ParamField path="publicIdentity" type="PublicIdentity" required>
+  The peer's public identity
+</ParamField>
+
+<ResponseField name="dm" type="Dm?">
+  The DM if found, nil otherwise
+</ResponseField>
+
+### findMessage()
+
+Find a message by ID.
+
+```swift
+public func findMessage(messageId: String) throws -> DecodedMessage?
+```
+
+<ParamField path="messageId" type="String" required>
+  The hex-encoded message ID
+</ParamField>
+
+<ResponseField name="message" type="DecodedMessage?">
+  The message if found, nil otherwise
+</ResponseField>
+
+### findEnrichedMessage()
+
+Find an enriched message by ID (includes reactions, replies, etc.).
+
+```swift
+public func findEnrichedMessage(messageId: String) throws -> DecodedMessageV2?
+```
+
+<ParamField path="messageId" type="String" required>
+  The hex-encoded message ID
+</ParamField>
+
+<ResponseField name="message" type="DecodedMessageV2?">
+  The enriched message if found, nil otherwise
+</ResponseField>
+
+## Syncing
+
+### sync()
+
+Sync conversations with the network.
+
+```swift
+public func sync() async throws
+```
+
+```swift
+try await client.conversations.sync()
+```
+
+### syncAllConversations()
+
+Sync all conversations and return summary.
+
+```swift
+public func syncAllConversations(
+    consentStates: [ConsentState]? = nil
+) async throws -> GroupSyncSummary
+```
+
+<ParamField path="consentStates" type="[ConsentState]" optional>
+  Filter by consent states
+</ParamField>
+
+<ResponseField name="summary" type="GroupSyncSummary">
+  Summary of sync operation with counts
+</ResponseField>
+
+```swift
+let summary = try await client.conversations.syncAllConversations()
+print("Synced \(summary.numSynced) of \(summary.numEligible) conversations")
+```
+
+## Streaming
+
+### stream()
+
+Stream new conversations as they are created.
+
+```swift
+public func stream(
+    type: ConversationFilterType = .all,
+    onClose: (() -> Void)? = nil
+) -> AsyncThrowingStream<Conversation, Error>
+```
+
+<ParamField path="type" type="ConversationFilterType" default=".all">
+  Filter type (.all, .groups, or .dms)
+</ParamField>
+
+<ParamField path="onClose" type="(() -> Void)" optional>
+  Callback when the stream closes
+</ParamField>
+
+<ResponseField name="stream" type="AsyncThrowingStream<Conversation, Error>">
+  Stream of new conversations
+</ResponseField>
+
+```swift
+for try await conversation in client.conversations.stream() {
+    print("New conversation: \(conversation.id)")
+}
+```
+
+### streamAllMessages()
+
+Stream all messages from all conversations.
+
+```swift
+public func streamAllMessages(
+    type: ConversationFilterType = .all,
+    consentStates: [ConsentState]? = nil,
+    onClose: (() -> Void)? = nil
+) -> AsyncThrowingStream<DecodedMessage, Error>
+```
+
+<ParamField path="type" type="ConversationFilterType" default=".all">
+  Filter type (.all, .groups, or .dms)
+</ParamField>
+
+<ParamField path="consentStates" type="[ConsentState]" optional>
+  Filter by consent states
+</ParamField>
+
+<ParamField path="onClose" type="(() -> Void)" optional>
+  Callback when the stream closes
+</ParamField>
+
+<ResponseField name="stream" type="AsyncThrowingStream<DecodedMessage, Error>">
+  Stream of all new messages
+</ResponseField>
+
+```swift
+for try await message in client.conversations.streamAllMessages() {
+    print("New message from \(message.senderInboxId): \(message.content())")
+}
+```
+
+### streamMessageDeletions()
+
+Stream deleted or disappeared messages.
+
+```swift
+public func streamMessageDeletions(
+    onClose: (() -> Void)? = nil
+) -> AsyncThrowingStream<DecodedMessageV2, Error>
+```
+
+<ParamField path="onClose" type="(() -> Void)" optional>
+  Callback when the stream closes
+</ParamField>
+
+<ResponseField name="stream" type="AsyncThrowingStream<DecodedMessageV2, Error>">
+  Stream of deleted messages
+</ResponseField>
+
+```swift
+for try await deletedMessage in client.conversations.streamMessageDeletions() {
+    print("Message deleted: \(deletedMessage.id)")
+}
+```
+
+## Message Management
+
+### deleteMessageLocally()
+
+Delete a message from the local database only.
+
+```swift
+public func deleteMessageLocally(messageId: String) throws
+```
+
+<ParamField path="messageId" type="String" required>
+  The hex-encoded message ID to delete
+</ParamField>
+
+<Info>
+  This only deletes the message locally. It does not delete it from other devices or installations.
+</Info>
+
+```swift
+try client.conversations.deleteMessageLocally(messageId: "abc123")
+```
+
+## Push Notifications
+
+### getHmacKeys()
+
+Get HMAC keys for push notification encryption.
+
+```swift
+public func getHmacKeys() throws -> Xmtp_KeystoreApi_V1_GetConversationHmacKeysResponse
+```
+
+<ResponseField name="hmacKeys" type="Xmtp_KeystoreApi_V1_GetConversationHmacKeysResponse">
+  HMAC keys for all conversations
+</ResponseField>
+
+```swift
+let hmacKeys = try client.conversations.getHmacKeys()
+```
+
+### allPushTopics()
+
+Get all push notification topics.
+
+```swift
+public func allPushTopics() async throws -> [String]
+```
+
+<ResponseField name="topics" type="[String]">
+  Array of push notification topics
+</ResponseField>
+
+```swift
+let topics = try await client.conversations.allPushTopics()
+```
+
+## Welcome Messages
+
+### fromWelcome()
+
+Process a welcome message envelope and return the conversation.
+
+```swift
+public func fromWelcome(envelopeBytes: Data) async throws -> Conversation?
+```
+
+<ParamField path="envelopeBytes" type="Data" required>
+  The welcome message envelope bytes
+</ParamField>
+
+<ResponseField name="conversation" type="Conversation?">
+  The conversation created from the welcome message
+</ResponseField>
+
+```swift
+if let conversation = try await client.conversations.fromWelcome(
+    envelopeBytes: welcomeData
+) {
+    print("Joined conversation: \(conversation.id)")
+}
+```
+
+## Types
+
+### ConversationFilterType
+
+```swift
+public enum ConversationFilterType {
+    case all
+    case groups
+    case dms
+}
+```
+
+Filter type for conversation operations.
+
+### ConversationsOrderBy
+
+```swift
+public enum ConversationsOrderBy {
+    case createdAt
+    case lastActivity
+}
+```
+
+Sort order for listing conversations.
+
+### GroupSyncSummary
+
+```swift
+public struct GroupSyncSummary {
+    public var numEligible: UInt64
+    public var numSynced: UInt64
+}
+```
+
+Summary of a sync operation.
+
+### ConversationError
+
+```swift
+public enum ConversationError: Error {
+    case memberCannotBeSelf
+    case memberNotRegistered([String])
+    case groupsRequireMessagePassed
+    case notSupportedByGroups
+    case streamingFailure
+}
+```
+
+Errors that can be thrown by conversation operations.

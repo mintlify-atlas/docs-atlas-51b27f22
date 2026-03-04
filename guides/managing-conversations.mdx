@@ -1,0 +1,580 @@
+---
+title: Managing Conversations
+description: List, sync, filter, and manage conversations in the XMTP iOS SDK
+---
+
+The XMTP iOS SDK provides powerful tools for managing both group chats and direct messages through a unified conversations interface.
+
+## Accessing Conversations
+
+Access the conversations manager through your client:
+
+```swift Client.swift:185-188
+let client = try await Client.create(
+    account: signingKey,
+    options: clientOptions
+)
+
+let conversations = client.conversations
+```
+
+## Listing Conversations
+
+### List All Conversations
+
+Retrieve all conversations (both groups and DMs):
+
+```swift Conversations.swift:47-49
+// List all conversations
+let allConversations = try await client.conversations.list()
+
+// Iterate through conversations
+for conversation in allConversations {
+    switch conversation {
+    case .group(let group):
+        print("Group: \(try group.name())")
+    case .dm(let dm):
+        print("DM with: \(try dm.peerInboxId)")
+    }
+}
+```
+
+### List Groups Only
+
+```swift Conversations.swift:268-298
+let groups = try await client.conversations.listGroups()
+
+for group in groups {
+    let name = try group.name()
+    let memberCount = try await group.members.count
+    print("Group '\(name)' has \(memberCount) members")
+}
+```
+
+### List Direct Messages Only
+
+```swift
+let dms = try await client.conversations.listDms()
+
+for dm in dms {
+    let peerInboxId = try dm.peerInboxId
+    print("DM with inbox: \(peerInboxId)")
+}
+```
+
+## Filtering Conversations
+
+### Filter by Creation Time
+
+List conversations created within a time range:
+
+```swift Conversations.swift:268-291
+let now = Date().millisecondsSinceEpoch
+let oneDayAgo = now - (24 * 60 * 60 * 1000)
+
+let recentGroups = try await client.conversations.listGroups(
+    createdAfterNs: oneDayAgo,
+    createdBeforeNs: now
+)
+```
+
+### Filter by Last Activity
+
+Find conversations with recent messages:
+
+```swift Conversations.swift:268-291
+let activeGroups = try await client.conversations.listGroups(
+    lastActivityAfterNs: oneDayAgo,
+    orderBy: .lastActivity
+)
+```
+
+### Filter by Consent State
+
+Filter by user consent preferences:
+
+```swift Conversations.swift:268-291
+let allowedGroups = try await client.conversations.listGroups(
+    consentStates: [.allowed]
+)
+
+let unknownGroups = try await client.conversations.listGroups(
+    consentStates: [.unknown]
+)
+```
+
+### Limit Results
+
+```swift Conversations.swift:268-291
+let recentConversations = try await client.conversations.listGroups(
+    limit: 20,
+    orderBy: .lastActivity
+)
+```
+
+## Sorting Conversations
+
+### Sort by Last Activity
+
+```swift Conversations.swift:51-60
+let conversations = try await client.conversations.listGroups(
+    orderBy: .lastActivity
+)
+```
+
+### Sort by Creation Date
+
+```swift Conversations.swift:51-60
+let conversations = try await client.conversations.listGroups(
+    orderBy: .createdAt
+)
+```
+
+## Syncing Conversations
+
+### Sync All Conversations
+
+Fetch new conversations from the network:
+
+<Steps>
+
+<Step title="Basic sync">
+
+```swift Conversations.swift:255-257
+try await client.conversations.sync()
+
+// Now list updated conversations
+let conversations = try await client.conversations.list()
+```
+
+</Step>
+
+<Step title="Sync with summary">
+
+Get detailed information about the sync operation:
+
+```swift Conversations.swift:259-266
+let summary = try await client.conversations.syncAllConversations()
+
+print("Synced \(summary.numSynced) out of \(summary.numEligible) conversations")
+```
+
+</Step>
+
+<Step title="Sync with filters">
+
+```swift Conversations.swift:259-266
+// Only sync allowed conversations
+let summary = try await client.conversations.syncAllConversations(
+    consentStates: [.allowed]
+)
+```
+
+</Step>
+
+</Steps>
+
+### Sync Individual Conversations
+
+Sync a specific conversation:
+
+```swift Conversation.swift:124-131
+let conversation = try await client.conversations.list().first!
+
+try await conversation.sync()
+```
+
+For groups:
+
+```swift Group.swift:71-73
+let group = try await client.conversations.listGroups().first!
+try await group.sync()
+```
+
+For DMs:
+
+```swift Dm.swift:50-52
+let dm = try await client.conversations.listDms().first!
+try await dm.sync()
+```
+
+## Finding Conversations
+
+### Find by Conversation ID
+
+```swift Conversations.swift:164-175
+let conversationId = "your-conversation-id"
+
+if let conversation = try await client.conversations.findConversation(
+    conversationId: conversationId
+) {
+    // Use the conversation
+    try await conversation.send(text: "Hello!")
+}
+```
+
+### Find by Topic
+
+```swift Conversations.swift:177-200
+let topic = "/xmtp/mls/1/g-abc123/proto"
+
+if let conversation = try await client.conversations.findConversationByTopic(
+    topic: topic
+) {
+    print("Found conversation")
+}
+```
+
+### Find Group by ID
+
+```swift Conversations.swift:151-162
+if let group = try client.conversations.findGroup(
+    groupId: groupId
+) {
+    let name = try group.name()
+    print("Found group: \(name)")
+}
+```
+
+### Find DM by Inbox ID
+
+```swift Conversations.swift:202-213
+if let dm = try client.conversations.findDmByInboxId(
+    inboxId: peerInboxId
+) {
+    print("Found DM")
+}
+```
+
+### Find DM by Identity
+
+```swift Conversations.swift:215-226
+let identity = PublicIdentity(
+    kind: .ethereum,
+    identifier: "0x123..."
+)
+
+if let dm = try await client.conversations.findDmByIdentity(
+    publicIdentity: identity
+) {
+    print("Found DM with identity")
+}
+```
+
+## Conversation Metadata
+
+### Access Basic Properties
+
+```swift Conversation.swift:19-233
+let conversation = try await client.conversations.list().first!
+
+// Common properties
+let id = conversation.id
+let topic = conversation.topic
+let createdAt = conversation.createdAt
+let createdAtNs = conversation.createdAtNs
+let lastActivityAtNs = conversation.lastActivityAtNs
+
+// Get conversation type
+switch conversation.type {
+case .group:
+    print("This is a group chat")
+case .dm:
+    print("This is a direct message")
+}
+```
+
+### Get Members
+
+```swift Conversation.swift:73-80
+let members = try await conversation.members()
+
+for member in members {
+    print("Member: \(member.inboxId)")
+}
+```
+
+### Check Creator Status
+
+```swift Conversation.swift:64-71
+let isCreator = try await conversation.isCreator()
+
+if isCreator {
+    print("You created this conversation")
+}
+```
+
+### Get Last Message
+
+```swift Conversation.swift:46-53
+if let lastMessage = try await conversation.lastMessage() {
+    print("Last message: \(lastMessage.content())")
+}
+```
+
+## Conversation Settings
+
+### Consent Management
+
+Manage user consent for conversations:
+
+```swift Conversation.swift:82-98
+// Get current consent state
+let consentState = try conversation.consentState()
+
+switch consentState {
+case .allowed:
+    print("Conversation is allowed")
+case .denied:
+    print("Conversation is blocked")
+case .unknown:
+    print("No consent preference set")
+}
+
+// Update consent state
+try await conversation.updateConsentState(state: .allowed)
+```
+
+### Disappearing Messages
+
+Configure message retention:
+
+```swift Conversation.swift:28-44
+// Check if disappearing messages are enabled
+let isEnabled = try conversation.isDisappearingMessagesEnabled()
+
+// Get current settings
+if let settings = conversation.disappearingMessageSettings {
+    print("Messages disappear after \(settings.retentionDurationInNs) ns")
+}
+
+// Update settings
+let newSettings = DisappearingMessageSettings(
+    disappearStartingAtNs: Date().millisecondsSinceEpoch,
+    retentionDurationInNs: 24 * 60 * 60 * 1_000_000_000  // 24 hours
+)
+try await conversation.updateDisappearingMessageSettings(newSettings)
+
+// Clear settings
+try await conversation.clearDisappearingMessageSettings()
+```
+
+## Conversation Status
+
+### Check Activity Status
+
+```swift Conversation.swift:500-507
+let isActive = try conversation.isActive()
+
+if isActive {
+    print("Conversation is active")
+} else {
+    print("Conversation has been closed")
+}
+```
+
+### Check Fork Status
+
+```swift Conversation.swift:55-62
+let forkStatus = conversation.commitLogForkStatus()
+
+switch forkStatus {
+case .forked:
+    print("Warning: Conversation has forked")
+case .notForked:
+    print("Conversation is synchronized")
+case .unknown:
+    print("Fork status is unknown")
+}
+```
+
+### Check Pause Status
+
+```swift Conversation.swift:339-346
+if let minVersion = try await conversation.pausedForVersion() {
+    print("Conversation is paused, requires SDK version: \(minVersion)")
+} else {
+    print("Conversation is not paused")
+}
+```
+
+## Streaming Conversations
+
+Listen for new conversations in real-time:
+
+```swift
+let stream = client.conversations.stream()
+
+for try await conversation in stream {
+    switch conversation {
+    case .group(let group):
+        print("New group: \(try group.name())")
+    case .dm(let dm):
+        print("New DM: \(try dm.peerInboxId)")
+    }
+}
+```
+
+## Advanced Filtering
+
+### Combine Multiple Filters
+
+```swift
+let now = Date().millisecondsSinceEpoch
+let oneWeekAgo = now - (7 * 24 * 60 * 60 * 1000)
+
+let activeAllowedGroups = try await client.conversations.listGroups(
+    createdAfterNs: oneWeekAgo,
+    lastActivityAfterNs: oneWeekAgo,
+    limit: 50,
+    consentStates: [.allowed],
+    orderBy: .lastActivity
+)
+```
+
+### Filter Conversations by Type
+
+```swift
+let allConversations = try await client.conversations.list()
+
+// Filter to only groups
+let groups = allConversations.compactMap { conversation -> Group? in
+    if case .group(let group) = conversation {
+        return group
+    }
+    return nil
+}
+
+// Filter to only DMs
+let dms = allConversations.compactMap { conversation -> Dm? in
+    if case .dm(let dm) = conversation {
+        return dm
+    }
+    return nil
+}
+```
+
+## Working with Conversation Collections
+
+### Group by Activity
+
+```swift
+import Foundation
+
+let conversations = try await client.conversations.list()
+
+let now = Date().millisecondsSinceEpoch
+let oneDayAgo = now - (24 * 60 * 60 * 1000)
+let oneWeekAgo = now - (7 * 24 * 60 * 60 * 1000)
+
+let today = conversations.filter { $0.lastActivityAtNs > oneDayAgo }
+let thisWeek = conversations.filter {
+    $0.lastActivityAtNs > oneWeekAgo && $0.lastActivityAtNs <= oneDayAgo
+}
+let older = conversations.filter { $0.lastActivityAtNs <= oneWeekAgo }
+
+print("Today: \(today.count)")
+print("This Week: \(thisWeek.count)")
+print("Older: \(older.count)")
+```
+
+## Error Handling
+
+```swift
+do {
+    try await client.conversations.sync()
+    let conversations = try await client.conversations.list()
+    
+    for conversation in conversations {
+        let members = try await conversation.members()
+        print("Conversation has \(members.count) members")
+    }
+} catch ConversationError.memberNotRegistered(let addresses) {
+    print("Members not registered: \(addresses)")
+} catch ConversationError.streamingFailure {
+    print("Failed to stream conversations")
+} catch {
+    print("Unexpected error: \(error)")
+}
+```
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Sync before listing">
+    Always sync conversations before listing to ensure you have the latest data:
+    
+    ```swift
+    try await client.conversations.sync()
+    let conversations = try await client.conversations.list()
+    ```
+  </Accordion>
+
+  <Accordion title="Use appropriate filters">
+    Apply filters to reduce data transfer and improve performance:
+    
+    ```swift
+    // Only fetch recent, allowed conversations
+    let conversations = try await client.conversations.listGroups(
+        lastActivityAfterNs: recentTimestamp,
+        consentStates: [.allowed],
+        limit: 50
+    )
+    ```
+  </Accordion>
+
+  <Accordion title="Cache conversation references">
+    Store conversation IDs rather than full conversation objects:
+    
+    ```swift
+    let conversationIds = conversations.map { $0.id }
+    UserDefaults.standard.set(conversationIds, forKey: "recentConversations")
+    
+    // Later, retrieve by ID
+    if let conversation = try await client.conversations.findConversation(
+        conversationId: storedId
+    ) {
+        // Use conversation
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="Handle pagination">
+    Use limits and ordering for efficient pagination:
+    
+    ```swift
+    var allConversations: [Group] = []
+    let pageSize = 50
+    var lastTimestamp: Int64? = nil
+    
+    repeat {
+        let page = try await client.conversations.listGroups(
+            lastActivityBeforeNs: lastTimestamp,
+            limit: pageSize,
+            orderBy: .lastActivity
+        )
+        
+        allConversations.append(contentsOf: page)
+        lastTimestamp = page.last?.lastActivityAtNs
+        
+    } while lastTimestamp != nil
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Group Chat" icon="users" href="/guides/group-chat">
+    Learn about group-specific features and management
+  </Card>
+  <Card title="Direct Messages" icon="message" href="/guides/direct-messages">
+    Explore direct message functionality
+  </Card>
+  <Card title="Sending Messages" icon="paper-plane" href="/guides/sending-messages">
+    Start sending messages in conversations
+  </Card>
+  <Card title="Receiving Messages" icon="inbox" href="/guides/receiving-messages">
+    Learn how to receive and process messages
+  </Card>
+</CardGroup>

@@ -1,0 +1,818 @@
+---
+title: "Client"
+description: "API reference for the XMTP iOS Client"
+---
+
+The `Client` class is the main entry point for interacting with the XMTP network. It manages authentication, conversations, and network connections.
+
+## Creating a Client
+
+### create()
+
+Create a new XMTP client with a signing key.
+
+```swift
+public static func create(
+    account: SigningKey,
+    options: ClientOptions
+) async throws -> Client
+```
+
+<ParamField path="account" type="SigningKey" required>
+  The signing key used to authenticate and sign messages
+</ParamField>
+
+<ParamField path="options" type="ClientOptions" required>
+  Configuration options for the client
+</ParamField>
+
+<ResponseField name="Client" type="Client">
+  Returns an initialized and authenticated XMTP client
+</ResponseField>
+
+```swift
+let client = try await Client.create(
+    account: signingKey,
+    options: clientOptions
+)
+```
+
+### build()
+
+Build a client without signing capabilities (read-only mode).
+
+```swift
+public static func build(
+    publicIdentity: PublicIdentity,
+    options: ClientOptions,
+    inboxId: InboxId? = nil
+) async throws -> Client
+```
+
+<ParamField path="publicIdentity" type="PublicIdentity" required>
+  The public identity to build the client for
+</ParamField>
+
+<ParamField path="options" type="ClientOptions" required>
+  Configuration options for the client
+</ParamField>
+
+<ParamField path="inboxId" type="String" optional>
+  Optional inbox ID. If provided, builds offline without network calls
+</ParamField>
+
+<ResponseField name="Client" type="Client">
+  Returns a client instance without signing capabilities
+</ResponseField>
+
+```swift
+let client = try await Client.build(
+    publicIdentity: publicIdentity,
+    options: clientOptions
+)
+```
+
+## Properties
+
+### inboxID
+
+```swift
+public let inboxID: InboxId
+```
+
+The unique inbox identifier for this client.
+
+### installationID
+
+```swift
+public let installationID: String
+```
+
+The unique installation identifier for this device.
+
+### libXMTPVersion
+
+```swift
+public let libXMTPVersion: String
+```
+
+The version of the underlying libXMTP library.
+
+### dbPath
+
+```swift
+public let dbPath: String
+```
+
+The file path to the local database.
+
+### publicIdentity
+
+```swift
+public let publicIdentity: PublicIdentity
+```
+
+The public identity associated with this client.
+
+### environment
+
+```swift
+public let environment: XMTPEnvironment
+```
+
+The XMTP network environment (dev, production, or local).
+
+### conversations
+
+```swift
+public lazy var conversations: Conversations
+```
+
+Access to conversation management functionality.
+
+## Static Methods
+
+### canMessage()
+
+Check if accounts can receive XMTP messages.
+
+```swift
+public static func canMessage(
+    accountIdentities: [PublicIdentity],
+    api: ClientOptions.Api
+) async throws -> [String: Bool]
+```
+
+<ParamField path="accountIdentities" type="[PublicIdentity]" required>
+  Array of public identities to check
+</ParamField>
+
+<ParamField path="api" type="ClientOptions.Api" required>
+  API configuration to use for the check
+</ParamField>
+
+<ResponseField name="result" type="[String: Bool]">
+  Dictionary mapping identity identifiers to boolean indicating if they can receive messages
+</ResponseField>
+
+```swift
+let canMessageMap = try await Client.canMessage(
+    accountIdentities: [identity1, identity2],
+    api: clientOptions.api
+)
+print(canMessageMap["0x123..."]) // true or false
+```
+
+### revokeInstallations()
+
+Revoke specific installations from an inbox.
+
+```swift
+public static func revokeInstallations(
+    api: ClientOptions.Api,
+    signingKey: SigningKey,
+    inboxId: InboxId,
+    installationIds: [String]
+) async throws
+```
+
+<ParamField path="api" type="ClientOptions.Api" required>
+  API configuration
+</ParamField>
+
+<ParamField path="signingKey" type="SigningKey" required>
+  Signing key with authority to revoke
+</ParamField>
+
+<ParamField path="inboxId" type="String" required>
+  The inbox ID to revoke installations from
+</ParamField>
+
+<ParamField path="installationIds" type="[String]" required>
+  Array of installation IDs to revoke
+</ParamField>
+
+```swift
+try await Client.revokeInstallations(
+    api: clientOptions.api,
+    signingKey: signingKey,
+    inboxId: "inbox123",
+    installationIds: ["install1", "install2"]
+)
+```
+
+### getOrCreateInboxId()
+
+Get the inbox ID for an identity, or generate a new one if none exists.
+
+```swift
+public static func getOrCreateInboxId(
+    api: ClientOptions.Api,
+    publicIdentity: PublicIdentity
+) async throws -> InboxId
+```
+
+<ParamField path="api" type="ClientOptions.Api" required>
+  API configuration
+</ParamField>
+
+<ParamField path="publicIdentity" type="PublicIdentity" required>
+  The public identity to lookup
+</ParamField>
+
+<ResponseField name="inboxId" type="String">
+  The inbox ID for the identity
+</ResponseField>
+
+### inboxStatesForInboxIds()
+
+Get inbox state information for multiple inbox IDs.
+
+```swift
+public static func inboxStatesForInboxIds(
+    inboxIds: [InboxId],
+    api: ClientOptions.Api
+) async throws -> [InboxState]
+```
+
+<ParamField path="inboxIds" type="[String]" required>
+  Array of inbox IDs to query
+</ParamField>
+
+<ParamField path="api" type="ClientOptions.Api" required>
+  API configuration
+</ParamField>
+
+<ResponseField name="inboxStates" type="[InboxState]">
+  Array of inbox state information
+</ResponseField>
+
+## Instance Methods
+
+### canMessage()
+
+Check if an identity can receive messages.
+
+```swift
+public func canMessage(identity: PublicIdentity) async throws -> Bool
+```
+
+<ParamField path="identity" type="PublicIdentity" required>
+  The identity to check
+</ParamField>
+
+<ResponseField name="canMessage" type="Bool">
+  True if the identity can receive messages
+</ResponseField>
+
+```swift
+let canMessage = try await client.canMessage(identity: peerIdentity)
+if canMessage {
+    // Create conversation
+}
+```
+
+### addAccount()
+
+Add a new account to this inbox.
+
+```swift
+public func addAccount(
+    newAccount: SigningKey,
+    allowReassignInboxId: Bool = false
+) async throws
+```
+
+<ParamField path="newAccount" type="SigningKey" required>
+  The new account's signing key
+</ParamField>
+
+<ParamField path="allowReassignInboxId" type="Bool" default="false">
+  Whether to allow reassigning the inbox if already associated
+</ParamField>
+
+<Warning>
+  Adding a wallet already associated with an inbox will cause that wallet to lose access to the original inbox unless `allowReassignInboxId` is true.
+</Warning>
+
+### removeAccount()
+
+Remove an account from this inbox.
+
+```swift
+public func removeAccount(
+    recoveryAccount: SigningKey,
+    identityToRemove: PublicIdentity
+) async throws
+```
+
+<ParamField path="recoveryAccount" type="SigningKey" required>
+  The recovery account signing key (must have authority)
+</ParamField>
+
+<ParamField path="identityToRemove" type="PublicIdentity" required>
+  The identity to remove from the inbox
+</ParamField>
+
+### revokeAllOtherInstallations()
+
+Revoke all installations except the current one.
+
+```swift
+public func revokeAllOtherInstallations(signingKey: SigningKey) async throws
+```
+
+<ParamField path="signingKey" type="SigningKey" required>
+  Signing key with authority to revoke
+</ParamField>
+
+```swift
+try await client.revokeAllOtherInstallations(signingKey: signingKey)
+```
+
+### revokeInstallations()
+
+Revoke specific installations.
+
+```swift
+public func revokeInstallations(
+    signingKey: SigningKey,
+    installationIds: [String]
+) async throws
+```
+
+<ParamField path="signingKey" type="SigningKey" required>
+  Signing key with authority to revoke
+</ParamField>
+
+<ParamField path="installationIds" type="[String]" required>
+  Array of installation IDs to revoke
+</ParamField>
+
+### inboxIdFromIdentity()
+
+Lookup the inbox ID for an identity.
+
+```swift
+public func inboxIdFromIdentity(identity: PublicIdentity) async throws -> InboxId?
+```
+
+<ParamField path="identity" type="PublicIdentity" required>
+  The identity to lookup
+</ParamField>
+
+<ResponseField name="inboxId" type="String?">
+  The inbox ID if found, nil otherwise
+</ResponseField>
+
+### sendSyncRequest()
+
+Manually trigger a device sync to sync records from other devices.
+
+```swift
+public func sendSyncRequest() async throws
+```
+
+```swift
+try await client.sendSyncRequest()
+```
+
+### signWithInstallationKey()
+
+Sign a message with the installation key.
+
+```swift
+public func signWithInstallationKey(message: String) throws -> Data
+```
+
+<ParamField path="message" type="String" required>
+  The message to sign
+</ParamField>
+
+<ResponseField name="signature" type="Data">
+  The signature bytes
+</ResponseField>
+
+### verifySignature()
+
+Verify a signature was created by this installation.
+
+```swift
+public func verifySignature(message: String, signature: Data) throws -> Bool
+```
+
+<ParamField path="message" type="String" required>
+  The original message
+</ParamField>
+
+<ParamField path="signature" type="Data" required>
+  The signature to verify
+</ParamField>
+
+<ResponseField name="isValid" type="Bool">
+  True if the signature is valid
+</ResponseField>
+
+### verifySignatureWithInstallationId()
+
+Verify a signature was created by a specific installation.
+
+```swift
+public func verifySignatureWithInstallationId(
+    message: String,
+    signature: Data,
+    installationId: String
+) throws -> Bool
+```
+
+<ParamField path="message" type="String" required>
+  The original message
+</ParamField>
+
+<ParamField path="signature" type="Data" required>
+  The signature to verify
+</ParamField>
+
+<ParamField path="installationId" type="String" required>
+  The installation ID to verify against
+</ParamField>
+
+<ResponseField name="isValid" type="Bool">
+  True if the signature is valid
+</ResponseField>
+
+### inboxState()
+
+Get the current inbox state.
+
+```swift
+public func inboxState(refreshFromNetwork: Bool) async throws -> InboxState
+```
+
+<ParamField path="refreshFromNetwork" type="Bool" required>
+  Whether to refresh from the network or use cached data
+</ParamField>
+
+<ResponseField name="inboxState" type="InboxState">
+  The current inbox state including all identities and installations
+</ResponseField>
+
+### inboxStatesForInboxIds()
+
+Get inbox states for multiple inbox IDs.
+
+```swift
+public func inboxStatesForInboxIds(
+    refreshFromNetwork: Bool,
+    inboxIds: [InboxId]
+) async throws -> [InboxState]
+```
+
+<ParamField path="refreshFromNetwork" type="Bool" required>
+  Whether to refresh from the network
+</ParamField>
+
+<ParamField path="inboxIds" type="[String]" required>
+  Array of inbox IDs to query
+</ParamField>
+
+<ResponseField name="inboxStates" type="[InboxState]">
+  Array of inbox states
+</ResponseField>
+
+### deleteLocalDatabase()
+
+Delete the local database and drop the connection.
+
+```swift
+public func deleteLocalDatabase() throws
+```
+
+<Warning>
+  This permanently deletes all local conversation and message data. This action cannot be undone.
+</Warning>
+
+```swift
+try client.deleteLocalDatabase()
+```
+
+### reconnectLocalDatabase()
+
+Reconnect to the local database after dropping the connection.
+
+```swift
+public func reconnectLocalDatabase() async throws
+```
+
+```swift
+try await client.reconnectLocalDatabase()
+```
+
+## Archiving
+
+### createArchive()
+
+Create an encrypted archive of the local database.
+
+```swift
+public func createArchive(
+    path: String,
+    encryptionKey: Data,
+    opts: ArchiveOptions = ArchiveOptions()
+) async throws
+```
+
+<ParamField path="path" type="String" required>
+  File path where the archive will be created
+</ParamField>
+
+<ParamField path="encryptionKey" type="Data" required>
+  Encryption key for the archive
+</ParamField>
+
+<ParamField path="opts" type="ArchiveOptions" default="ArchiveOptions()">
+  Archive options
+</ParamField>
+
+```swift
+try await client.createArchive(
+    path: "/path/to/archive.db",
+    encryptionKey: encryptionKey
+)
+```
+
+### importArchive()
+
+Import an encrypted archive into the local database.
+
+```swift
+public func importArchive(path: String, encryptionKey: Data) async throws
+```
+
+<ParamField path="path" type="String" required>
+  File path to the archive
+</ParamField>
+
+<ParamField path="encryptionKey" type="Data" required>
+  Decryption key for the archive
+</ParamField>
+
+```swift
+try await client.importArchive(
+    path: "/path/to/archive.db",
+    encryptionKey: encryptionKey
+)
+```
+
+### archiveMetadata()
+
+Read metadata from an archive without importing it.
+
+```swift
+public func archiveMetadata(
+    path: String,
+    encryptionKey: Data
+) async throws -> ArchiveMetadata
+```
+
+<ParamField path="path" type="String" required>
+  File path to the archive
+</ParamField>
+
+<ParamField path="encryptionKey" type="Data" required>
+  Decryption key for the archive
+</ParamField>
+
+<ResponseField name="metadata" type="ArchiveMetadata">
+  Metadata about the archive contents
+</ResponseField>
+
+## Logging
+
+### activatePersistentLibXMTPLogWriter()
+
+Activate persistent logging for LibXMTP.
+
+```swift
+public static func activatePersistentLibXMTPLogWriter(
+    logLevel: LogLevel,
+    rotationSchedule: FfiLogRotation,
+    maxFiles: Int,
+    customLogDirectory: URL? = nil,
+    processType: FfiProcessType = .main
+)
+```
+
+<ParamField path="logLevel" type="LogLevel" required>
+  The minimum log level to capture (.error, .warn, .info, .debug)
+</ParamField>
+
+<ParamField path="rotationSchedule" type="FfiLogRotation" required>
+  When log files should rotate
+</ParamField>
+
+<ParamField path="maxFiles" type="Int" required>
+  Maximum number of log files to keep
+</ParamField>
+
+<ParamField path="customLogDirectory" type="URL" optional>
+  Optional custom directory for logs (defaults to documents/xmtp_logs)
+</ParamField>
+
+<ParamField path="processType" type="FfiProcessType" default=".main">
+  Process type (main app or notification extension)
+</ParamField>
+
+```swift
+Client.activatePersistentLibXMTPLogWriter(
+    logLevel: .debug,
+    rotationSchedule: .daily,
+    maxFiles: 7
+)
+```
+
+### deactivatePersistentLibXMTPLogWriter()
+
+Deactivate the persistent log writer.
+
+```swift
+public static func deactivatePersistentLibXMTPLogWriter()
+```
+
+### getXMTPLogFilePaths()
+
+Get paths to all XMTP log files.
+
+```swift
+public static func getXMTPLogFilePaths(
+    customLogDirectory: URL? = nil
+) -> [String]
+```
+
+<ParamField path="customLogDirectory" type="URL" optional>
+  Optional custom log directory
+</ParamField>
+
+<ResponseField name="paths" type="[String]">
+  Array of file paths to log files
+</ResponseField>
+
+### clearXMTPLogs()
+
+Clear all XMTP log files.
+
+```swift
+public static func clearXMTPLogs(
+    customLogDirectory: URL? = nil
+) -> Int
+```
+
+<ParamField path="customLogDirectory" type="URL" optional>
+  Optional custom log directory
+</ParamField>
+
+<ResponseField name="count" type="Int">
+  Number of files deleted
+</ResponseField>
+
+```swift
+let deletedCount = Client.clearXMTPLogs()
+print("Deleted \(deletedCount) log files")
+```
+
+## Codec Registration
+
+### register()
+
+Register a custom content codec.
+
+```swift
+public static func register(codec: any ContentCodec)
+```
+
+<ParamField path="codec" type="ContentCodec" required>
+  The codec to register
+</ParamField>
+
+```swift
+Client.register(codec: AttachmentCodec())
+Client.register(codec: ReactionCodec())
+```
+
+## ClientError
+
+Errors that can be thrown by Client operations.
+
+```swift
+public enum ClientError: Error {
+    case creationError(String)
+    case missingInboxId
+    case invalidInboxId(String)
+}
+```
+
+### creationError
+
+Thrown when client creation fails.
+
+### missingInboxId
+
+Thrown when an inbox ID is required but not available.
+
+### invalidInboxId
+
+Thrown when an inbox ID format is invalid (e.g., starts with '0x').
+
+## ClientOptions
+
+Configuration options for creating a client.
+
+```swift
+public struct ClientOptions {
+    public var api: Api = Api()
+    public var codecs: [any ContentCodec] = []
+    public var preAuthenticateToInboxCallback: PreEventCallback?
+    public var dbEncryptionKey: Data
+    public var dbDirectory: String?
+    public var historySyncUrl: String?
+    public var deviceSyncEnabled: Bool
+    public var debugEventsEnabled: Bool
+    public var forkRecoveryOptions: ForkRecoveryOptions?
+}
+```
+
+<ParamField path="api" type="Api" default="Api()">
+  API configuration (environment, security settings)
+</ParamField>
+
+<ParamField path="codecs" type="[ContentCodec]" default="[]">
+  Array of content codecs to register
+</ParamField>
+
+<ParamField path="preAuthenticateToInboxCallback" type="PreEventCallback" optional>
+  Callback invoked before authentication
+</ParamField>
+
+<ParamField path="dbEncryptionKey" type="Data" required>
+  Encryption key for the local database
+</ParamField>
+
+<ParamField path="dbDirectory" type="String" optional>
+  Custom directory for the database (defaults to documents directory)
+</ParamField>
+
+<ParamField path="historySyncUrl" type="String" optional>
+  URL for history sync server
+</ParamField>
+
+<ParamField path="deviceSyncEnabled" type="Bool" default="true">
+  Whether device sync is enabled
+</ParamField>
+
+<ParamField path="debugEventsEnabled" type="Bool" default="false">
+  Whether debug events are enabled
+</ParamField>
+
+<ParamField path="forkRecoveryOptions" type="ForkRecoveryOptions" optional>
+  Fork recovery configuration
+</ParamField>
+
+### ClientOptions.Api
+
+Network configuration options.
+
+```swift
+public struct Api {
+    public var env: XMTPEnvironment = .dev
+    public var isSecure: Bool = true
+    public var appVersion: String?
+    public var gatewayHost: String?
+}
+```
+
+<ParamField path="env" type="XMTPEnvironment" default=".dev">
+  Network environment (.dev, .production, .local)
+</ParamField>
+
+<ParamField path="isSecure" type="Bool" default="true">
+  Whether to use TLS (should only be false for .local)
+</ParamField>
+
+<ParamField path="appVersion" type="String" optional>
+  App version string
+</ParamField>
+
+<ParamField path="gatewayHost" type="String" optional>
+  Custom gateway host URL
+</ParamField>
+
+```swift
+let options = ClientOptions(
+    api: ClientOptions.Api(
+        env: .production,
+        isSecure: true
+    ),
+    dbEncryptionKey: encryptionKey,
+    deviceSyncEnabled: true
+)
+```

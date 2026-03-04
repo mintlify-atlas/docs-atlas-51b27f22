@@ -1,0 +1,285 @@
+---
+title: 'AttachmentCodec'
+description: 'Codec for sending file attachments with metadata'
+icon: 'paperclip'
+---
+
+## Overview
+
+The `AttachmentCodec` enables sending files as message attachments. It encodes file data along with metadata like filename and MIME type. Attachments are sent inline with the message.
+
+<Warning>
+For large files, consider using [RemoteAttachmentCodec](/api/codecs/remote-attachment) instead, which stores the file externally and sends only a reference.
+</Warning>
+
+## Content Type ID
+
+```swift
+ContentTypeAttachment = ContentTypeID(
+    authorityID: "xmtp.org",
+    typeID: "attachment",
+    versionMajor: 1,
+    versionMinor: 0
+)
+```
+
+## Structure
+
+### Attachment
+
+```swift
+public struct Attachment: Codable {
+    public var filename: String
+    public var mimeType: String
+    public var data: Data
+    
+    public init(filename: String, mimeType: String, data: Data)
+}
+```
+
+#### Properties
+
+<ParamField path="filename" type="String" required>
+  The name of the file (e.g., "photo.jpg", "document.pdf")
+</ParamField>
+
+<ParamField path="mimeType" type="String" required>
+  The MIME type of the file (e.g., "image/jpeg", "application/pdf")
+</ParamField>
+
+<ParamField path="data" type="Data" required>
+  The binary content of the file
+</ParamField>
+
+### AttachmentCodec
+
+```swift
+public struct AttachmentCodec: ContentCodec {
+    public typealias T = Attachment
+    public var contentType = ContentTypeAttachment
+    
+    public func encode(content: Attachment) throws -> EncodedContent
+    public func decode(content: EncodedContent) throws -> Attachment
+    public func fallback(content: Attachment) throws -> String?
+    public func shouldPush(content: Attachment) throws -> Bool
+}
+```
+
+## Usage
+
+### Registering the Codec
+
+Before sending attachments, register the codec:
+
+```swift
+import XMTPiOS
+
+Client.register(codec: AttachmentCodec())
+```
+
+### Sending Attachments
+
+```swift
+// Create an attachment from file data
+let imageData = try Data(contentsOf: imageURL)
+let attachment = Attachment(
+    filename: "photo.jpg",
+    mimeType: "image/jpeg",
+    data: imageData
+)
+
+// Send the attachment
+try await conversation.send(
+    content: attachment,
+    options: .init(contentType: ContentTypeAttachment)
+)
+```
+
+### Common MIME Types
+
+```swift
+// Images
+Attachment(filename: "photo.jpg", mimeType: "image/jpeg", data: jpegData)
+Attachment(filename: "icon.png", mimeType: "image/png", data: pngData)
+Attachment(filename: "image.gif", mimeType: "image/gif", data: gifData)
+
+// Documents
+Attachment(filename: "doc.pdf", mimeType: "application/pdf", data: pdfData)
+Attachment(filename: "sheet.xlsx", mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", data: xlsxData)
+
+// Video
+Attachment(filename: "video.mp4", mimeType: "video/mp4", data: videoData)
+
+// Audio
+Attachment(filename: "audio.mp3", mimeType: "audio/mpeg", data: audioData)
+```
+
+### Receiving Attachments
+
+```swift
+let messages = try await conversation.messages()
+
+for message in messages {
+    if message.contentTypeId == ContentTypeAttachment.id {
+        let attachment: Attachment = try message.content()
+        
+        print("Filename: \(attachment.filename)")
+        print("MIME type: \(attachment.mimeType)")
+        print("Size: \(attachment.data.count) bytes")
+        
+        // Save to file
+        let fileURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(attachment.filename)
+        try attachment.data.write(to: fileURL)
+    }
+}
+```
+
+## Implementation Details
+
+### Encoding
+
+The codec stores filename and MIME type as parameters:
+
+```swift
+public func encode(content: Attachment) throws -> EncodedContent {
+    var encodedContent = EncodedContent()
+    encodedContent.type = ContentTypeAttachment
+    encodedContent.parameters = [
+        "filename": content.filename,
+        "mimeType": content.mimeType,
+    ]
+    encodedContent.content = content.data
+    return encodedContent
+}
+```
+
+### Decoding
+
+The codec validates required parameters and reconstructs the attachment:
+
+```swift
+public func decode(content: EncodedContent) throws -> Attachment {
+    guard let mimeType = content.parameters["mimeType"],
+          let filename = content.parameters["filename"]
+    else {
+        throw AttachmentCodecError.invalidParameters
+    }
+    
+    return Attachment(
+        filename: filename,
+        mimeType: mimeType,
+        data: content.content
+    )
+}
+```
+
+### Fallback
+
+Provides a user-friendly message for clients that don't support attachments:
+
+```swift
+public func fallback(content: Attachment) throws -> String? {
+    "Can't display \"\(content.filename)\". This app doesn't support attachments."
+}
+```
+
+### Push Notifications
+
+Attachments trigger push notifications:
+
+```swift
+public func shouldPush(content: Attachment) throws -> Bool {
+    true
+}
+```
+
+## Error Handling
+
+```swift
+public enum AttachmentCodecError: Error {
+    case invalidParameters  // Missing filename or mimeType
+    case unknownDecodingError
+}
+```
+
+### Example
+
+```swift
+do {
+    let attachment: Attachment = try message.content()
+    // Process attachment
+} catch AttachmentCodecError.invalidParameters {
+    print("Attachment is missing required metadata")
+} catch {
+    print("Error decoding attachment: \(error)")
+}
+```
+
+## Best Practices
+
+<Tip>
+**File Size Limits**: Keep attachments small (under 1 MB) for better performance. For larger files, use [RemoteAttachmentCodec](/api/codecs/remote-attachment).
+</Tip>
+
+<Tip>
+**Security**: Validate MIME types and scan file content before processing attachments from untrusted sources.
+</Tip>
+
+<Tip>
+**Storage**: Consider implementing local caching to avoid re-downloading attachments.
+</Tip>
+
+## Complete Example
+
+```swift
+import XMTPiOS
+import UIKit
+
+class AttachmentExample {
+    func sendImage() async throws {
+        // Register codec
+        Client.register(codec: AttachmentCodec())
+        
+        // Get image from photo library
+        let image = UIImage(named: "photo")!
+        let imageData = image.jpegData(compressionQuality: 0.8)!
+        
+        // Create attachment
+        let attachment = Attachment(
+            filename: "photo.jpg",
+            mimeType: "image/jpeg",
+            data: imageData
+        )
+        
+        // Send
+        let conversation = try await client.conversations
+            .newConversation(with: recipientAddress)
+        try await conversation.send(
+            content: attachment,
+            options: .init(contentType: ContentTypeAttachment)
+        )
+    }
+    
+    func receiveImage(message: DecodedMessage) async throws {
+        // Decode attachment
+        let attachment: Attachment = try message.content()
+        
+        // Display image
+        if attachment.mimeType.hasPrefix("image/") {
+            let image = UIImage(data: attachment.data)
+            // Show in UI
+        }
+    }
+}
+```
+
+## Related
+
+- [RemoteAttachmentCodec](/api/codecs/remote-attachment) - For large files stored externally
+- [ContentCodec Protocol](/api/content-codec) - Base protocol for all codecs
+- [Content Types Guide](/guides/content-types) - Working with different content types
+
+## Source
+
+- [AttachmentCodec.swift](https://github.com/xmtp/xmtp-ios/blob/main/Sources/XMTPiOS/Codecs/AttachmentCodec.swift)

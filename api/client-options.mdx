@@ -1,0 +1,219 @@
+---
+title: ClientOptions
+description: Configuration options for creating an XMTP Client
+---
+
+`ClientOptions` defines all configuration settings for creating and initializing an XMTP client. It includes network settings, database configuration, history sync options, and fork recovery settings.
+
+## Constructor
+
+```swift
+public init(
+    api: Api = Api(),
+    codecs: [any ContentCodec] = [],
+    preAuthenticateToInboxCallback: PreEventCallback? = nil,
+    dbEncryptionKey: Data,
+    dbDirectory: String? = nil,
+    historySyncUrl: String? = nil,
+    useDefaultHistorySyncUrl: Bool = true,
+    deviceSyncEnabled: Bool = true,
+    debugEventsEnabled: Bool = false,
+    forkRecoveryOptions: ForkRecoveryOptions? = nil
+)
+```
+
+<ParamField path="api" type="Api" default="Api()">
+  Network and API configuration settings. See [Api struct](#api-struct) below.
+</ParamField>
+
+<ParamField path="codecs" type="[ContentCodec]" default="[]">
+  Array of content codecs to register with the client. Codecs enable encoding and decoding different message content types.
+</ParamField>
+
+<ParamField path="preAuthenticateToInboxCallback" type="PreEventCallback?" default="nil">
+  Optional callback invoked immediately before an Auth Inbox signature is requested from the user. Useful for showing UI or logging.
+</ParamField>
+
+<ParamField path="dbEncryptionKey" type="Data" required>
+  **Required.** Encryption key for the local database. Must be provided to secure conversation data at rest.
+</ParamField>
+
+<ParamField path="dbDirectory" type="String?" default="nil">
+  Optional custom directory path for the local database. If not specified, uses the system documents directory.
+</ParamField>
+
+<ParamField path="historySyncUrl" type="String?" default="nil">
+  Optional custom URL for the history sync server. If `nil` and `useDefaultHistorySyncUrl` is `true`, uses the environment's default sync URL.
+</ParamField>
+
+<ParamField path="useDefaultHistorySyncUrl" type="Bool" default="true">
+  Whether to use the default history sync URL for the selected environment when `historySyncUrl` is not specified.
+</ParamField>
+
+<ParamField path="deviceSyncEnabled" type="Bool" default="true">
+  Enable or disable device sync functionality for syncing conversation state across multiple devices.
+</ParamField>
+
+<ParamField path="debugEventsEnabled" type="Bool" default="false">
+  Enable debug event logging for troubleshooting and development purposes.
+</ParamField>
+
+<ParamField path="forkRecoveryOptions" type="ForkRecoveryOptions?" default="nil">
+  Optional fork recovery configuration. See [ForkRecoveryOptions](#forkrecoveryoptions) below.
+</ParamField>
+
+## Api struct
+
+The `Api` struct configures network and connectivity settings:
+
+```swift
+public struct Api {
+    public var env: XMTPEnvironment = .dev
+    public var isSecure: Bool = true
+    public var appVersion: String?
+    public var gatewayHost: String?
+}
+```
+
+<ParamField path="env" type="XMTPEnvironment" default=".dev">
+  The XMTP network environment to connect to. See [XMTPEnvironment](/api/environment) for available options.
+</ParamField>
+
+<ParamField path="isSecure" type="Bool" default="true">
+  Whether the API client should use TLS security. Should only be `false` when using the `.local` environment.
+</ParamField>
+
+<ParamField path="appVersion" type="String?" default="nil">
+  Optional application version identifier sent with API requests.
+</ParamField>
+
+<ParamField path="gatewayHost" type="String?" default="nil">
+  Optional custom gateway URL for future proofing. Reserved for future use.
+</ParamField>
+
+## ForkRecoveryOptions
+
+Configures fork recovery behavior for handling conversation state divergence:
+
+```swift
+public struct ForkRecoveryOptions {
+    public var enableRecoveryRequests: ForkRecoveryPolicy
+    public var groupsToRequestRecovery: [String]
+    public var disableRecoveryResponses: Bool?
+    public var workerIntervalNs: UInt64?
+}
+```
+
+<ParamField path="enableRecoveryRequests" type="ForkRecoveryPolicy" required>
+  Policy determining which groups can request fork recovery:
+  - `.none`: No fork recovery requests
+  - `.allowlistedGroups`: Only groups in `groupsToRequestRecovery`
+  - `.all`: All groups can request recovery
+</ParamField>
+
+<ParamField path="groupsToRequestRecovery" type="[String]" required>
+  Array of group IDs that are allowed to request fork recovery when `enableRecoveryRequests` is `.allowlistedGroups`.
+</ParamField>
+
+<ParamField path="disableRecoveryResponses" type="Bool?" default="nil">
+  Optional flag to disable responding to fork recovery requests from other clients.
+</ParamField>
+
+<ParamField path="workerIntervalNs" type="UInt64?" default="nil">
+  Optional interval in nanoseconds for the fork recovery worker process.
+</ParamField>
+
+## Example usage
+
+### Basic configuration
+
+```swift
+import XMTP
+
+// Generate a random encryption key (store this securely!)
+let encryptionKey = Data(repeating: 0, count: 32)
+
+let options = ClientOptions(
+    api: ClientOptions.Api(
+        env: .production,
+        isSecure: true
+    ),
+    dbEncryptionKey: encryptionKey
+)
+
+let client = try await Client.create(
+    account: signingKey,
+    options: options
+)
+```
+
+### With custom codecs
+
+```swift
+let options = ClientOptions(
+    api: ClientOptions.Api(env: .production),
+    codecs: [
+        TextCodec(),
+        AttachmentCodec(),
+        ReactionCodec()
+    ],
+    dbEncryptionKey: encryptionKey
+)
+```
+
+### With custom database location
+
+```swift
+let customDbPath = FileManager.default
+    .urls(for: .applicationSupportDirectory, in: .userDomainMask)
+    .first?.path
+
+let options = ClientOptions(
+    dbEncryptionKey: encryptionKey,
+    dbDirectory: customDbPath
+)
+```
+
+### With fork recovery
+
+```swift
+let forkRecovery = ForkRecoveryOptions(
+    enableRecoveryRequests: .allowlistedGroups,
+    groupsToRequestRecovery: ["group-id-1", "group-id-2"]
+)
+
+let options = ClientOptions(
+    dbEncryptionKey: encryptionKey,
+    forkRecoveryOptions: forkRecovery
+)
+```
+
+### With custom history sync
+
+```swift
+let options = ClientOptions(
+    dbEncryptionKey: encryptionKey,
+    historySyncUrl: "https://custom-history-server.example.com",
+    deviceSyncEnabled: true
+)
+```
+
+### Development environment
+
+```swift
+let options = ClientOptions(
+    api: ClientOptions.Api(
+        env: .dev,
+        isSecure: true,
+        appVersion: "1.0.0"
+    ),
+    dbEncryptionKey: encryptionKey,
+    debugEventsEnabled: true
+)
+```
+
+## Related APIs
+
+- [Client](/api/client) - Creating and using XMTP clients
+- [XMTPEnvironment](/api/environment) - Network environment configuration
+- [SigningKey](/api/signing-key) - Wallet signing interface
